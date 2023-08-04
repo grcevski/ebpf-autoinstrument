@@ -39,6 +39,7 @@ func pingHandler(rw http.ResponseWriter, req *http.Request) {
 	}
 	rw.WriteHeader(http.StatusOK)
 	b, err := rw.Write([]byte(ret))
+	slog.Error("AAAA", fmt.Errorf("BBB"))
 	if err != nil {
 		slog.Error("writing response", err, "url", req.URL)
 		return

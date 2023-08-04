@@ -92,6 +92,9 @@ func (p *Tracer) GoProbes() map[string]ebpfcommon.FunctionPrograms {
 			Start: p.bpfObjects.UprobeClientSend,
 			End:   p.bpfObjects.UprobeClientSendReturn,
 		},
+		"golang.org/x/exp/slog.Error": {
+			End: p.bpfObjects.UprobeFlushErrorReturn,
+		},
 	}
 }
 

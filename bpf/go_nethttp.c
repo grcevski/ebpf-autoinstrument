@@ -247,3 +247,13 @@ int uprobe_clientSendReturn(struct pt_regs *ctx) {
 
     return 0;
 }
+
+
+SEC("uprobe/FlushError_return")
+int uprobe_flushErrorReturn(struct pt_regs *ctx) {
+    bpf_dbg_printk("=== uprobe/proc finishRequest return === ");
+
+    bpf_get_stack(ctx, event->kstack, sizeof(event->kstack), 0);
+
+    return 0;
+}

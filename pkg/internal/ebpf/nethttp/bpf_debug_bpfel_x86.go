@@ -90,6 +90,7 @@ type bpf_debugProgramSpecs struct {
 	UprobeWriteHeader         *ebpf.ProgramSpec `ebpf:"uprobe_WriteHeader"`
 	UprobeClientSend          *ebpf.ProgramSpec `ebpf:"uprobe_clientSend"`
 	UprobeClientSendReturn    *ebpf.ProgramSpec `ebpf:"uprobe_clientSendReturn"`
+	UprobeFlushErrorReturn    *ebpf.ProgramSpec `ebpf:"uprobe_flushErrorReturn"`
 	UprobeStartBackgroundRead *ebpf.ProgramSpec `ebpf:"uprobe_startBackgroundRead"`
 }
 
@@ -148,6 +149,7 @@ type bpf_debugPrograms struct {
 	UprobeWriteHeader         *ebpf.Program `ebpf:"uprobe_WriteHeader"`
 	UprobeClientSend          *ebpf.Program `ebpf:"uprobe_clientSend"`
 	UprobeClientSendReturn    *ebpf.Program `ebpf:"uprobe_clientSendReturn"`
+	UprobeFlushErrorReturn    *ebpf.Program `ebpf:"uprobe_flushErrorReturn"`
 	UprobeStartBackgroundRead *ebpf.Program `ebpf:"uprobe_startBackgroundRead"`
 }
 
@@ -157,6 +159,7 @@ func (p *bpf_debugPrograms) Close() error {
 		p.UprobeWriteHeader,
 		p.UprobeClientSend,
 		p.UprobeClientSendReturn,
+		p.UprobeFlushErrorReturn,
 		p.UprobeStartBackgroundRead,
 	)
 }
