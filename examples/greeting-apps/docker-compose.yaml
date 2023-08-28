@@ -18,14 +18,16 @@ services:
 
   # Beyla for NGINX
   nginxbeyla:
-    image: grafana/ebpf-autoinstrument:latest
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile
     command:
-      - /otelauto
+      - /beyla
       - --config=/configs/beyla-config.yml
     volumes:
       - ./configs/:/configs
     container_name: demo-nginxbeyla
-    privileged: true 
+    privileged: true # You can instead use cap_add: [ SYS_ADMIN ]
     network_mode: "service:nginx"
     pid: "service:nginx"
     environment:
@@ -49,9 +51,11 @@ services:
 
   # Beyla for Java Spring Boot 3.0 GraalVM Native Image
   gobeyla:
-    image: grafana/ebpf-autoinstrument:latest
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile
     command:
-      - /otelauto
+      - /beyla
       - --config=/configs/beyla-config.yml
     volumes:
       - ./configs/:/configs
@@ -80,9 +84,11 @@ services:
 
   # Beyla for Java Spring Boot 3.0 GraalVM Native Image
   javabeyla:
-    image: grafana/ebpf-autoinstrument:latest
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile
     command:
-      - /otelauto
+      - /beyla
       - --config=/configs/beyla-config.yml
     volumes:
       - ./configs/:/configs
@@ -111,9 +117,11 @@ services:
 
   # Beyla for Rust Actix
   rustbeyla:
-    image: grafana/ebpf-autoinstrument:latest
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile
     command:
-      - /otelauto
+      - /beyla
       - --config=/configs/beyla-config.yml
     volumes:
       - ./configs/:/configs
