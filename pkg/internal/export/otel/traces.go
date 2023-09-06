@@ -200,6 +200,7 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.NetSockPeerAddr(span.Peer),
 			semconv.NetHostName(span.Host),
 			semconv.NetHostPort(span.HostPort),
+			semconv.PeerService(span.Peer),
 			semconv.HTTPRequestContentLength(int(span.ContentLength)),
 		}
 		if span.Route != "" {
@@ -210,7 +211,7 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.RPCMethod(span.Path),
 			semconv.RPCSystemGRPC,
 			semconv.RPCGRPCStatusCodeKey.Int(span.Status),
-			semconv.NetSockPeerAddr(span.Peer),
+			semconv.NetPeerName(span.Peer),
 			semconv.NetHostName(span.Host),
 			semconv.NetHostPort(span.HostPort),
 		}
@@ -219,8 +220,10 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.HTTPMethod(span.Method),
 			semconv.HTTPStatusCode(span.Status),
 			semconv.HTTPURL(span.Path),
-			semconv.NetPeerName(span.Host),
-			semconv.NetPeerPort(span.HostPort),
+			semconv.NetSockPeerAddr(span.Host),
+			semconv.NetSockPeerPort(span.HostPort),
+			semconv.PeerService(span.Host),
+			semconv.NetHostName(span.Peer),
 			semconv.HTTPRequestContentLength(int(span.ContentLength)),
 		}
 	case request.EventTypeGRPCClient:
@@ -285,12 +288,30 @@ func (r *TracesReporter) makeSpan(parentCtx context.Context, tracer trace2.Trace
 		}
 	}
 
-	// Create a parent span for the whole request session
-	ctx, sp := tracer.Start(parentCtx, traceName(span),
-		trace2.WithTimestamp(t.RequestStart),
-		trace2.WithSpanKind(spanKind(span)),
-		trace2.WithAttributes(r.traceAttributes(span)...),
-	)
+	var sp, innerSp trace2.Span
+	var ctx context.Context
+	kind := spanKind(span)
+
+	if kind == trace2.SpanKindServer {
+		// Create a parent span for the whole request session
+		ctx, sp = tracer.Start(parentCtx, traceName(span),
+			trace2.WithTimestamp(t.RequestStart),
+			trace2.WithSpanKind(trace2.SpanKindUnspecified),
+		)
+
+		ctx, innerSp = tracer.Start(ctx, traceName(span),
+			trace2.WithTimestamp(t.RequestStart),
+			trace2.WithSpanKind(trace2.SpanKindServer),
+			trace2.WithAttributes(r.traceAttributes(span)...),
+		)
+	} else {
+		// Create a parent span for the whole request session
+		ctx, sp = tracer.Start(parentCtx, traceName(span),
+			trace2.WithTimestamp(t.RequestStart),
+			trace2.WithSpanKind(kind),
+			trace2.WithAttributes(r.traceAttributes(span)...),
+		)
+	}
 
 	if span.RequestStart != span.Start {
 		var spP trace2.Span
@@ -309,6 +330,10 @@ func (r *TracesReporter) makeSpan(parentCtx context.Context, tracer trace2.Trace
 			trace2.WithSpanKind(trace2.SpanKindInternal),
 		)
 		spP.End(trace2.WithTimestamp(t.End))
+	}
+
+	if innerSp != nil {
+		innerSp.End(trace2.WithTimestamp(t.End))
 	}
 
 	sp.End(trace2.WithTimestamp(t.End))
