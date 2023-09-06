@@ -1,8 +1,6 @@
 package otel
 
 import (
-	"net"
-
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
@@ -41,11 +39,6 @@ var DefaultBuckets = Buckets{
 }
 
 func otelResource(svcName, cfgSvcNamespace string) *resource.Resource {
-	ip, err := myIP()
-	if err == nil && ip != "" {
-		svcName = ip
-	}
-
 	attrs := []attribute.KeyValue{
 		semconv.ServiceName(svcName),
 		// SpanMetrics requires an extra attribute besides service name
@@ -61,19 +54,4 @@ func otelResource(svcName, cfgSvcNamespace string) *resource.Resource {
 	}
 
 	return resource.NewWithAttributes(semconv.SchemaURL, attrs...)
-}
-
-func myIP() (string, error) {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return "", err
-	}
-	for _, addr := range addrs {
-		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				return ipnet.IP.String(), nil
-			}
-		}
-	}
-	return "", nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -38,6 +39,7 @@ type SessionSpan struct {
 var topSpans, _ = lru.New[uint64, SessionSpan](8192)
 var clientSpans, _ = lru.New[uint64, []request.Span](8192)
 var namedTracers, _ = lru.New[string, *trace.TracerProvider](512)
+var serviceNames, _ = lru.New[string, string](512)
 
 const reporterName = "github.com/grafana/beyla"
 
@@ -198,9 +200,9 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.HTTPStatusCode(span.Status),
 			semconv.HTTPTarget(span.Path),
 			semconv.NetSockPeerAddr(span.Peer),
-			semconv.NetHostName(span.Host),
+			semconv.NetHostName(reverseDNS(span.Host)),
 			semconv.NetHostPort(span.HostPort),
-			semconv.PeerService(span.Peer),
+			semconv.PeerService(reverseDNS(span.Peer)),
 			semconv.HTTPRequestContentLength(int(span.ContentLength)),
 		}
 		if span.Route != "" {
@@ -214,6 +216,7 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.NetPeerName(span.Peer),
 			semconv.NetHostName(span.Host),
 			semconv.NetHostPort(span.HostPort),
+			semconv.PeerService(reverseDNS(span.Peer)),
 		}
 	case request.EventTypeHTTPClient:
 		attrs = []attribute.KeyValue{
@@ -222,8 +225,7 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.HTTPURL(span.Path),
 			semconv.NetSockPeerAddr(span.Host),
 			semconv.NetSockPeerPort(span.HostPort),
-			semconv.PeerService(span.Host),
-			semconv.NetHostName(span.Peer),
+			semconv.PeerService(reverseDNS(span.Host)),
 			semconv.HTTPRequestContentLength(int(span.ContentLength)),
 		}
 	case request.EventTypeGRPCClient:
@@ -233,6 +235,7 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.RPCGRPCStatusCodeKey.Int(span.Status),
 			semconv.NetPeerName(span.Host),
 			semconv.NetPeerPort(span.HostPort),
+			semconv.PeerService(reverseDNS(span.Host)),
 		}
 	}
 
@@ -288,30 +291,24 @@ func (r *TracesReporter) makeSpan(parentCtx context.Context, tracer trace2.Trace
 		}
 	}
 
-	var sp, innerSp trace2.Span
-	var ctx context.Context
+	var sp, shellSp trace2.Span
+	ctx := parentCtx
 	kind := spanKind(span)
 
-	if kind == trace2.SpanKindServer {
-		// Create a parent span for the whole request session
-		ctx, sp = tracer.Start(parentCtx, traceName(span),
+	// Add an unknown shell server span to ensure service graphs work well
+	if kind == trace2.SpanKindServer && span.TraceID == "" && reverseDNS(span.Peer) != span.Peer {
+		ctx, shellSp = tracer.Start(ctx, traceName(span),
 			trace2.WithTimestamp(t.RequestStart),
 			trace2.WithSpanKind(trace2.SpanKindUnspecified),
 		)
-
-		ctx, innerSp = tracer.Start(ctx, traceName(span),
-			trace2.WithTimestamp(t.RequestStart),
-			trace2.WithSpanKind(trace2.SpanKindServer),
-			trace2.WithAttributes(r.traceAttributes(span)...),
-		)
-	} else {
-		// Create a parent span for the whole request session
-		ctx, sp = tracer.Start(parentCtx, traceName(span),
-			trace2.WithTimestamp(t.RequestStart),
-			trace2.WithSpanKind(kind),
-			trace2.WithAttributes(r.traceAttributes(span)...),
-		)
 	}
+
+	// Create a parent span for the whole request session
+	ctx, sp = tracer.Start(ctx, traceName(span),
+		trace2.WithTimestamp(t.RequestStart),
+		trace2.WithSpanKind(kind),
+		trace2.WithAttributes(r.traceAttributes(span)...),
+	)
 
 	if span.RequestStart != span.Start {
 		var spP trace2.Span
@@ -332,8 +329,8 @@ func (r *TracesReporter) makeSpan(parentCtx context.Context, tracer trace2.Trace
 		spP.End(trace2.WithTimestamp(t.End))
 	}
 
-	if innerSp != nil {
-		innerSp.End(trace2.WithTimestamp(t.End))
+	if shellSp != nil {
+		shellSp.End(trace2.WithTimestamp(t.End))
 	}
 
 	sp.End(trace2.WithTimestamp(t.End))
@@ -526,4 +523,49 @@ func setTracesProtocol(cfg *TracesConfig) {
 	if cfg.Protocol != "" {
 		os.Setenv(envProtocol, string(cfg.Protocol))
 	}
+}
+
+func reverseDNS(ipAddr string) string {
+	name, ok := serviceNames.Get(ipAddr)
+
+	if ok {
+		return name
+	}
+
+	ip := net.ParseIP(ipAddr)
+	if ip == nil {
+		serviceNames.Add(ipAddr, ipAddr)
+		return ipAddr
+	}
+
+	names, err := net.LookupAddr(ip.String())
+	if err != nil {
+		serviceNames.Add(ipAddr, ipAddr)
+		return ipAddr
+	}
+
+	var localName string
+
+	// See if the reverse DNS lookup returned a name that the node reports as .local, remember it
+	for _, name := range names {
+		if strings.HasSuffix(name, ".local.") {
+			ind := strings.Index(name, ".local.")
+			localName = name[:ind]
+			break
+		}
+	}
+
+	for _, name := range names {
+		// If we didn't find the local name we just return the first name, otherwise the first that doesn't have the
+		// local name prefix
+		if localName == "" || !strings.HasPrefix(name, localName) {
+			dot := strings.Index(name, ".")
+			cleanName := name[:dot]
+			serviceNames.Add(ipAddr, cleanName)
+			return cleanName
+		}
+	}
+
+	serviceNames.Add(ipAddr, ipAddr)
+	return ipAddr
 }
