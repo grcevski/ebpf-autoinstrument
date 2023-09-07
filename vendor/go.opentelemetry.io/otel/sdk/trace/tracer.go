@@ -74,6 +74,7 @@ func (tr *tracer) newSpan(ctx context.Context, name string, config *trace.SpanCo
 	// If told explicitly to make this a new root use a zero value SpanContext
 	// as a parent which contains an invalid trace ID and is not remote.
 	var psc trace.SpanContext
+	esp := trace.SpanContextFromContext(ctx)
 	if config.NewRoot() {
 		ctx = trace.ContextWithSpanContext(ctx, psc)
 	} else {
@@ -86,7 +87,12 @@ func (tr *tracer) newSpan(ctx context.Context, name string, config *trace.SpanCo
 	var tid trace.TraceID
 	var sid trace.SpanID
 	if !psc.TraceID().IsValid() {
-		tid, sid = tr.provider.idGenerator.NewIDs(ctx)
+		if esp.TraceID().IsValid() {
+			tid = esp.TraceID()
+			sid = esp.SpanID()
+		} else {
+			tid, sid = tr.provider.idGenerator.NewIDs(ctx)
+		}
 	} else {
 		tid = psc.TraceID()
 		sid = tr.provider.idGenerator.NewSpanID(ctx, tid)

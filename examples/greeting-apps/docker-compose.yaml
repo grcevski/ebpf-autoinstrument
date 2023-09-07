@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  nginx:
+  demo-nginx:
     image: nginx:latest
     container_name: demo-nginx
     ports:
@@ -9,16 +9,19 @@ services:
     volumes:
       - ./configs/:/etc/nginx
     depends_on:
-      gotestserver:
+      demo-go-service:
         condition: service_started
-      javatestserver:
+      demo-graalvm-native-service:
         condition: service_started
-      rusttestserver:
+      demo-rust-service:
         condition: service_started
 
   # Beyla for NGINX
   nginxbeyla:
-    image: grafana/beyla:latest
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile  
+    #image: grafana/beyla:latest
     command:
       - /beyla
       - --config=/configs/beyla-config.yml
@@ -26,8 +29,8 @@ services:
       - ./configs/:/configs
     container_name: demo-nginxbeyla
     privileged: true 
-    network_mode: "service:nginx"
-    pid: "service:nginx"
+    network_mode: "service:demo-nginx"
+    pid: "service:demo-nginx"
     environment:
       PRINT_TRACES: "true"
       OPEN_PORT: "3330"
@@ -36,20 +39,23 @@ services:
       LOG_LEVEL: "DEBUG"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://agent:4018"
     depends_on:
-      nginx:
+      demo-nginx:
         condition: service_started
 
   # Go test server
   # Test server source can be found at test/integration/components/testserver
-  gotestserver:
+  demo-go-service:
     image: ghcr.io/grafana/beyla-demo/greeting-go/0.0.1
-    container_name: demo-gotestserver
+    container_name: demo-go-service
     #ports:
     #  - "8084:8080"
 
   # Beyla for Java Spring Boot 3.0 GraalVM Native Image
   gobeyla:
-    image: grafana/beyla:latest
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile  
+    #image: grafana/beyla:latest
     command:
       - /beyla
       - --config=/configs/beyla-config.yml
@@ -57,8 +63,8 @@ services:
       - ./configs/:/configs
     container_name: demo-gobeyla
     privileged: true 
-    network_mode: "service:gotestserver"
-    pid: "service:gotestserver"
+    network_mode: "service:demo-go-service"
+    pid: "service:demo-go-service"
     environment:
       PRINT_TRACES: "true"
       OPEN_PORT: "8080"
@@ -67,20 +73,23 @@ services:
       LOG_LEVEL: "DEBUG"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://agent:4018"
     depends_on:
-      gotestserver:
+      demo-go-service:
         condition: service_started
 
   # Java Spring Boot 3.0 GraalVM Native Image test server
   # Test server source can be found at test/integration/components/javatestserver
-  javatestserver:
+  demo-graalvm-native-service:
     image: ghcr.io/grafana/beyla-demo/greeting-graalvm-native/0.0.1
-    container_name: demo-javatestserver
+    container_name: demo-graalvm-native-service
     #ports:
     #  - "8085:8085"
 
   # Beyla for Java Spring Boot 3.0 GraalVM Native Image
   javabeyla:
-    image: grafana/beyla:latest
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile  
+    #image: grafana/beyla:latest
     command:
       - /beyla
       - --config=/configs/beyla-config.yml
@@ -88,8 +97,8 @@ services:
       - ./configs/:/configs
     container_name: demo-javabeyla
     privileged: true 
-    network_mode: "service:javatestserver"
-    pid: "service:javatestserver"
+    network_mode: "service:demo-graalvm-native-service"
+    pid: "service:demo-graalvm-native-service"
     environment:
       PRINT_TRACES: "true"
       OPEN_PORT: "8085"
@@ -98,20 +107,23 @@ services:
       LOG_LEVEL: "DEBUG"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://agent:4018"
     depends_on:
-      javatestserver:
+      demo-graalvm-native-service:
         condition: service_started
 
   # Rust Actix test server
   # Test server source can be found at test/integration/components/rusttestserver
-  rusttestserver:
+  demo-rust-service:
     image: ghcr.io/grafana/beyla-demo/greeting-actix-rust/0.0.1
-    container_name: demo-rusttestserver
+    container_name: demo-rust-service
     #ports:
     #  - "8086:8090"
 
   # Beyla for Rust Actix
   rustbeyla:
-    image: grafana/beyla:latest
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile  
+    #image: grafana/beyla:latest
     command:
       - /beyla
       - --config=/configs/beyla-config.yml
@@ -119,8 +131,8 @@ services:
       - ./configs/:/configs
     container_name: demo-rustbeyla
     privileged: true 
-    network_mode: "service:rusttestserver"
-    pid: "service:rusttestserver"
+    network_mode: "service:demo-rust-service"
+    pid: "service:demo-rust-service"
     environment:
       PRINT_TRACES: "true"
       OPEN_PORT: "8090"
@@ -129,7 +141,7 @@ services:
       LOG_LEVEL: "DEBUG"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://agent:4018"
     depends_on:
-      rusttestserver:
+      demo-rust-service:
         condition: service_started
 
   # Grafana Agent
@@ -173,4 +185,3 @@ services:
     ports:
       - "9009:9009"
       - "9096:9096"
-

@@ -3,8 +3,11 @@ package otel
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"hash/fnv"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -39,6 +42,7 @@ type SessionSpan struct {
 var topSpans, _ = lru.New[uint64, SessionSpan](8192)
 var clientSpans, _ = lru.New[uint64, []request.Span](8192)
 var namedTracers, _ = lru.New[string, *trace.TracerProvider](512)
+var serviceNames, _ = lru.New[string, string](512)
 
 const reporterName = "github.com/grafana/beyla"
 
@@ -199,8 +203,9 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.HTTPStatusCode(span.Status),
 			semconv.HTTPTarget(span.Path),
 			semconv.NetSockPeerAddr(span.Peer),
-			semconv.NetHostName(span.Host),
+			semconv.NetHostName(reverseDNS(span.Host)),
 			semconv.NetHostPort(span.HostPort),
+			semconv.PeerService(reverseDNS(span.Peer)),
 			semconv.HTTPRequestContentLength(int(span.ContentLength)),
 		}
 		if span.Route != "" {
@@ -212,7 +217,8 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.RPCSystemGRPC,
 			semconv.RPCGRPCStatusCodeKey.Int(span.Status),
 			semconv.NetSockPeerAddr(span.Peer),
-			semconv.NetHostName(span.Host),
+			semconv.NetHostName(reverseDNS(span.Host)),
+			semconv.PeerService(reverseDNS(span.Peer)),
 			semconv.NetHostPort(span.HostPort),
 		}
 	case request.EventTypeHTTPClient:
@@ -220,8 +226,9 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.HTTPMethod(span.Method),
 			semconv.HTTPStatusCode(span.Status),
 			semconv.HTTPURL(span.Path),
-			semconv.NetPeerName(span.Host),
-			semconv.NetPeerPort(span.HostPort),
+			semconv.NetSockPeerAddr(span.Host),
+			semconv.NetSockPeerPort(span.HostPort),
+			semconv.PeerService(reverseDNS(span.Host)),
 			semconv.HTTPRequestContentLength(int(span.ContentLength)),
 		}
 	case request.EventTypeGRPCClient:
@@ -229,8 +236,9 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 			semconv.RPCMethod(span.Path),
 			semconv.RPCSystemGRPC,
 			semconv.RPCGRPCStatusCodeKey.Int(span.Status),
-			semconv.NetPeerName(span.Host),
-			semconv.NetPeerPort(span.HostPort),
+			semconv.NetSockPeerAddr(span.Host),
+			semconv.NetSockPeerPort(span.HostPort),
+			semconv.PeerService(reverseDNS(span.Host)),
 		}
 	}
 
@@ -272,12 +280,72 @@ func spanKind(span *request.Span) trace2.SpanKind {
 	return trace2.SpanKindInternal
 }
 
-func handleTraceparentField(parentCtx context.Context, traceparent string) context.Context {
-	// If traceparent was not set in eBPF, entire field should be zeroed bytes.
-	if len(traceparent) < 55 || traceparent[0] == 0 {
-		return parentCtx
+func generateTraceId(host string, port int) [16]byte {
+	var id [16]byte
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil {
+		h := fnv.New64()
+		h.Write([]byte(host))
+		hash := h.Sum64()
+
+		binary.BigEndian.PutUint64(id[:8], hash)
+	} else {
+		ipInt := binary.BigEndian.Uint32(ip.To4())
+
+		binary.BigEndian.PutUint64(id[:8], uint64(ipInt))
 	}
 
+	binary.BigEndian.PutUint64(id[8:], uint64(port))
+
+	return id
+}
+
+func generateSpanId(timeSpan time.Time) [8]byte {
+	var id [8]byte
+	binary.BigEndian.PutUint64(id[:], uint64(timeSpan.UnixNano()))
+
+	return id
+}
+
+func generateTraceparent(parentCtx context.Context, span *request.Span) (context.Context, []trace2.SpanStartOption) {
+	now := time.Now()
+	timeSpan := now.Round(5 * time.Minute)
+
+	traceId := generateTraceId(span.Peer, span.PeerPort)
+	spanId := generateSpanId(timeSpan)
+
+	//fmt.Printf("traceId[%d]: %s-%s\n", spanKind(span), hex.EncodeToString(traceId[:]), hex.EncodeToString(spanId[:]))
+
+	spanCtx := trace2.NewSpanContext(trace2.SpanContextConfig{
+		TraceID:    traceId,
+		SpanID:     spanId,
+		TraceFlags: trace2.FlagsSampled,
+	})
+
+	ctx := trace2.ContextWithSpanContext(context.Background(), spanCtx)
+
+	if spanKind(span) == trace2.SpanKindServer {
+		if reverseDNS(span.Peer) != span.Peer {
+			spanCtx := trace2.SpanContextFromContext(parentCtx).WithTraceID(traceId).WithSpanID(spanId).WithTraceFlags(trace2.FlagsSampled)
+			return trace2.ContextWithSpanContext(parentCtx, spanCtx), nil
+		}
+		return parentCtx, nil
+	}
+
+	return ctx, []trace2.SpanStartOption{trace2.WithNewRoot()}
+}
+
+func handleTraceparent(parentCtx context.Context, span *request.Span) (context.Context, []trace2.SpanStartOption) {
+	traceparent := span.Traceparent
+	// If traceparent was not set in eBPF, entire field should be zeroed bytes.
+	if len(traceparent) < 55 || traceparent[0] == 0 {
+		return generateTraceparent(parentCtx, span)
+	}
+
+	return extractTraceparent(parentCtx, traceparent), nil
+}
+
+func extractTraceparent(parentCtx context.Context, traceparent string) context.Context {
 	// See https://www.w3.org/TR/trace-context/#traceparent-header-field-values for format.
 	// 2 hex version + dash + 32 hex traceID + dash + 16 hex parent + dash + 2 hex flags
 	traceID := string(traceparent[3:35])
@@ -296,7 +364,7 @@ func handleTraceparentField(parentCtx context.Context, traceparent string) conte
 			if err != nil {
 				slog.Debug("Invalid ParentID", "error:", err, "parentId:", parentID)
 			} else {
-				spanCtx := trace2.SpanContextFromContext(parentCtx).WithSpanID(spanID)
+				spanCtx = trace2.SpanContextFromContext(parentCtx).WithSpanID(spanID)
 				parentCtx = trace2.ContextWithSpanContext(parentCtx, spanCtx)
 			}
 
@@ -317,13 +385,17 @@ func handleTraceparentField(parentCtx context.Context, traceparent string) conte
 func (r *TracesReporter) makeSpan(parentCtx context.Context, tracer trace2.Tracer, span *request.Span) SessionSpan {
 	t := span.Timings()
 
-	parentCtx = handleTraceparentField(parentCtx, span.Traceparent)
+	parentCtx, options := handleTraceparent(parentCtx, span)
 
-	// Create a parent span for the whole request session
-	ctx, sp := tracer.Start(parentCtx, traceName(span),
+	startOptions := append(options,
 		trace2.WithTimestamp(t.RequestStart),
 		trace2.WithSpanKind(spanKind(span)),
 		trace2.WithAttributes(r.traceAttributes(span)...),
+	)
+
+	// Create a parent span for the whole request session
+	ctx, sp := tracer.Start(parentCtx, traceName(span),
+		startOptions...,
 	)
 
 	if span.RequestStart != span.Start {
@@ -535,4 +607,52 @@ func setTracesProtocol(cfg *TracesConfig) {
 	if cfg.Protocol != "" {
 		os.Setenv(envProtocol, string(cfg.Protocol))
 	}
+}
+
+func reverseDNS(ipAddr string) string {
+	name, ok := serviceNames.Get(ipAddr)
+
+	if ok {
+		return name
+	}
+
+	ip := net.ParseIP(ipAddr)
+	if ip == nil {
+		serviceNames.Add(ipAddr, ipAddr)
+		return ipAddr
+	}
+
+	names, err := net.LookupAddr(ip.String())
+	if err != nil {
+		serviceNames.Add(ipAddr, ipAddr)
+		return ipAddr
+	}
+
+	var localName string
+
+	// See if the reverse DNS lookup returned a name that the node reports as .local, remember it
+	for _, name := range names {
+		if strings.HasSuffix(name, ".local.") {
+			ind := strings.Index(name, ".local.")
+			localName = name[:ind]
+			break
+		}
+	}
+
+	for _, name := range names {
+		// If we didn't find the local name we just return the first name, otherwise the first that doesn't have the
+		// local name prefix
+		if localName == "" || !strings.HasPrefix(name, localName) {
+			dot := strings.Index(name, ".")
+			cleanName := name
+			if dot > 0 {
+				cleanName = name[:dot]
+			}
+			serviceNames.Add(ipAddr, cleanName)
+			return cleanName
+		}
+	}
+
+	serviceNames.Add(ipAddr, ipAddr)
+	return ipAddr
 }

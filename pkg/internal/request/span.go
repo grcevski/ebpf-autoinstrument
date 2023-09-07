@@ -31,6 +31,7 @@ type Span struct {
 	Path          string
 	Route         string
 	Peer          string
+	PeerPort      int
 	Host          string
 	HostPort      int
 	Status        int

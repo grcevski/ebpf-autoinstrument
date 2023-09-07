@@ -13,6 +13,7 @@ import (
 	"github.com/mariomac/pipes/pkg/node"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/sdk/trace"
 	trace2 "go.opentelemetry.io/otel/trace"
 
 	"github.com/grafana/beyla/pkg/internal/imetrics"
@@ -305,6 +306,47 @@ func TestTraces_InternalInstrumentationSampling(t *testing.T) {
 	})
 }
 
+func TestTraces_OverrideSpanContext(t *testing.T) {
+	s := makeSpan(request.EventTypeHTTPClient, "GET", "/smoke", "127.0.0.1", 12345, 200, 10000)
+
+	tcfg := TracesConfig{
+		Endpoint:           "https://localhost:3131",
+		TracesEndpoint:     "https://localhost:3232",
+		MaxQueueSize:       4096,
+		MaxExportBatchSize: 4096,
+		SamplingRatio:      1.0,
+	}
+
+	tr, err := newTracesReporter(context.Background(), &tcfg, &global.ContextInfo{})
+	require.NoError(t, err)
+
+	tp := trace.NewTracerProvider(
+		trace.WithResource(otelResource("name", "namespace")),
+		trace.WithSampler(trace.ParentBased(trace.TraceIDRatioBased(1.0))),
+	)
+
+	tr.makeSpan(context.Background(), tp.Tracer("hm"), &s)
+}
+
+func makeSpan(t request.EventType, method, path, peer string, peerPort int, status uint16, durationMs int64) request.Span {
+	return request.Span{
+		Type:          t,
+		ID:            1,
+		Method:        method,
+		Path:          path,
+		Peer:          peer,
+		PeerPort:      peerPort,
+		Host:          "127.0.0.1",
+		HostPort:      8080,
+		ContentLength: 16,
+		RequestStart:  1,
+		Start:         2,
+		End:           2 + durationMs,
+		Status:        int(status),
+		Traceparent:   "",
+	}
+}
+
 type fakeInternalTraces struct {
 	imetrics.NoopReporter
 	sum  atomic.Int32
@@ -402,7 +444,7 @@ func TestTraces_Traceparent(t *testing.T) {
 		parentCtx = trace2.ContextWithSpanContext(parentCtx, spanCtx)
 
 		t.Log("Testing traceparent:", tpTest.tp)
-		parentCtx = handleTraceparentField(parentCtx, string(tpTest.tp[:]))
+		parentCtx, _ = extractTraceparent(parentCtx, string(tpTest.tp[:]))
 
 		if tpTest.badTid {
 			assert.Equal(t, traceID, trace2.SpanContextFromContext(parentCtx).TraceID())
