@@ -560,7 +560,10 @@ func reverseDNS(ipAddr string) string {
 		// local name prefix
 		if localName == "" || !strings.HasPrefix(name, localName) {
 			dot := strings.Index(name, ".")
-			cleanName := name[:dot]
+			cleanName := name
+			if dot > 0 {
+				cleanName = name[:dot]				
+			}
 			serviceNames.Add(ipAddr, cleanName)
 			return cleanName
 		}
