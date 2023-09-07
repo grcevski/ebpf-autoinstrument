@@ -309,7 +309,7 @@ func generateSpanId(timeSpan time.Time) [8]byte {
 
 func generateTraceparent(parentCtx context.Context, span *request.Span) (context.Context, []trace2.SpanStartOption) {
 	now := time.Now()
-	timeSpan := now.Round(5 * time.Minute)
+	timeSpan := now.Round(10 * time.Second)
 
 	traceId := generateTraceId(span.Peer, span.PeerPort)
 	spanId := generateSpanId(timeSpan)
