@@ -18,10 +18,15 @@
 #include "go_nethttp.h"
 #include "go_traceparent.h"
 
+typedef struct client_func_invocation_t {
+    u64 start_monotime_ns;
+    struct pt_regs regs; // we store registers on invocation to be able to fetch the arguments at return
+} client_func_invocation;
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, void *); // key: pointer to the request goroutine
-    __type(value, func_invocation);
+    __type(value, client_func_invocation);
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
 } ongoing_http_client_requests SEC(".maps");
 
@@ -260,6 +265,8 @@ int uprobe_clientSendReturn(struct pt_regs *ctx) {
         }
     }
 
+    bpf_printk("traceparent: %s", trace->traceparent);
+
     bpf_probe_read(&trace->content_length, sizeof(trace->content_length), (void *)(req_ptr + content_length_ptr_pos));
 
     bpf_probe_read(&trace->status, sizeof(trace->status), (void *)(resp_ptr + status_code_ptr_pos));
@@ -269,5 +276,14 @@ int uprobe_clientSendReturn(struct pt_regs *ctx) {
     // submit the completed trace via ringbuffer
     bpf_ringbuf_submit(trace, get_flags());
 
+    return 0;
+}
+
+SEC("uprobe/header_writeSubset")
+int uprobe_writeSubset(struct pt_regs *ctx) {
+    bpf_dbg_printk("=== uprobe/proc header writeSubset === ");
+
+    void *goroutine_addr = GOROUTINE_PTR(ctx);
+    bpf_printk("goroutine_addr %lx", goroutine_addr);
     return 0;
 }

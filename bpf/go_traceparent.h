@@ -68,17 +68,17 @@ struct
     __uint(max_entries, 1);
 } golang_mapbucket_storage_map SEC(".maps");
 
-static __always_inline _Bool bpf_memcmp(char *s1, char *s2, s32 size)
+static __always_inline int bpf_memcmp(char *s1, char *s2, s32 size)
 {
     for (int i = 0; i < size; i++)
     {
         if (s1[i] != s2[i])
         {
-            return false;
+            return 0;
         }
     }
 
-    return true;
+    return 1;
 }
 
 static __always_inline void *extract_traceparent_from_req_headers(void *headers_ptr_ptr)
@@ -143,7 +143,7 @@ static __always_inline void *extract_traceparent_from_req_headers(void *headers_
             }
             char current_header_key[W3C_KEY_LENGTH];
             bpf_probe_read(current_header_key, sizeof(current_header_key), map_value->keys[i].str);
-            if (!bpf_memcmp(current_header_key, "traceparent", W3C_KEY_LENGTH) && !bpf_memcmp(current_header_key, "Traceparent", W3C_KEY_LENGTH))
+            if (!bpf_memcmp(current_header_key, "Traceparent", W3C_KEY_LENGTH)) // Golang request will normalize the header key to always be "Traceparent"
             {
                 continue;
             }

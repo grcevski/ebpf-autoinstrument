@@ -91,6 +91,7 @@ type bpfProgramSpecs struct {
 	UprobeClientSend          *ebpf.ProgramSpec `ebpf:"uprobe_clientSend"`
 	UprobeClientSendReturn    *ebpf.ProgramSpec `ebpf:"uprobe_clientSendReturn"`
 	UprobeStartBackgroundRead *ebpf.ProgramSpec `ebpf:"uprobe_startBackgroundRead"`
+	UprobeWriteSubset         *ebpf.ProgramSpec `ebpf:"uprobe_writeSubset"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
@@ -152,6 +153,7 @@ type bpfPrograms struct {
 	UprobeClientSend          *ebpf.Program `ebpf:"uprobe_clientSend"`
 	UprobeClientSendReturn    *ebpf.Program `ebpf:"uprobe_clientSendReturn"`
 	UprobeStartBackgroundRead *ebpf.Program `ebpf:"uprobe_startBackgroundRead"`
+	UprobeWriteSubset         *ebpf.Program `ebpf:"uprobe_writeSubset"`
 }
 
 func (p *bpfPrograms) Close() error {
@@ -161,6 +163,7 @@ func (p *bpfPrograms) Close() error {
 		p.UprobeClientSend,
 		p.UprobeClientSendReturn,
 		p.UprobeStartBackgroundRead,
+		p.UprobeWriteSubset,
 	)
 }
 
