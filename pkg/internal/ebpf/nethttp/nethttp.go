@@ -90,8 +90,8 @@ func (p *Tracer) GoProbes() map[string]ebpfcommon.FunctionPrograms {
 			Start: p.bpfObjects.UprobeWriteHeader,
 		},
 		"net/http.(*Transport).RoundTrip": {
-			Start: p.bpfObjects.UprobeClientSend,
-			End:   p.bpfObjects.UprobeClientSendReturn,
+			Start: p.bpfObjects.UprobeTransportRoundTrip,
+			End:   p.bpfObjects.UprobeTransportRoundTripReturn,
 		},
 		"net/http.Header.writeSubset": {
 			Start: p.bpfObjects.UprobeWriteSubset,

@@ -18,17 +18,33 @@
 #include "go_nethttp.h"
 #include "go_traceparent.h"
 
-typedef struct client_func_invocation_t {
-    u64 start_monotime_ns;
-    struct pt_regs regs; // we store registers on invocation to be able to fetch the arguments at return
-} client_func_invocation;
+#define CLIENT_FLAG_NEW 0x1
+
+typedef struct traceparent_info_t {
+    u8 traceparent[TRACEPARENT_LEN];
+    u8 flags;
+} traceparent_info;
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, void *); // key: pointer to the request goroutine
-    __type(value, client_func_invocation);
+    __type(value, func_invocation);
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
 } ongoing_http_client_requests SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, void *); // key: pointer to the request header map
+    __type(value, u64); // the goroutine of the transport request
+    __uint(max_entries, MAX_CONCURRENT_REQUESTS);
+} header_req_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, void *); // key: pointer to the request goroutine
+    __type(value, traceparent_info); // the goroutine of the transport request
+    __uint(max_entries, MAX_CONCURRENT_REQUESTS);
+} tp_infos SEC(".maps");
 
 /* HTTP Server */
 
@@ -176,16 +192,21 @@ int uprobe_WriteHeader(struct pt_regs *ctx) {
 
 /* HTTP Client. We expect to see HTTP client in both HTTP server and gRPC server calls.*/
 
-SEC("uprobe/clientSend")
-int uprobe_clientSend(struct pt_regs *ctx) {
-    bpf_dbg_printk("=== uprobe/proc http client.send === ");
+SEC("uprobe/transportRoundTrip")
+int uprobe_transportRoundTrip(struct pt_regs *ctx) {
+    bpf_dbg_printk("=== uprobe/proc http transport.RoundTrip === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
-    bpf_dbg_printk("goroutine_addr %lx", goroutine_addr);
+    void *req_ptr = GO_PARAM2(ctx);
+    bpf_dbg_printk("goroutine_addr %lx, req ptr %llx", goroutine_addr, req_ptr);
+
+    void *headers_ptr = NULL;
+    bpf_probe_read(&headers_ptr, sizeof(headers_ptr), (void*)(req_ptr + req_header_ptr_pos));
+    bpf_dbg_printk("goroutine_addr %lx, req ptr %llx, headers_ptr %llx", goroutine_addr, req_ptr, headers_ptr);
 
     func_invocation invocation = {
         .start_monotime_ns = bpf_ktime_get_ns(),
-        .regs = *ctx,
+        .regs = *ctx
     };
 
     // Write event
@@ -193,12 +214,16 @@ int uprobe_clientSend(struct pt_regs *ctx) {
         bpf_dbg_printk("can't update http client map element");
     }
 
+    if (headers_ptr) {
+        bpf_map_update_elem(&header_req_map, &headers_ptr, &goroutine_addr, BPF_ANY);
+    }
+
     return 0;
 }
 
-SEC("uprobe/clientSend_return")
-int uprobe_clientSendReturn(struct pt_regs *ctx) {
-    bpf_dbg_printk("=== uprobe/proc http client.send return === ");
+SEC("uprobe/transportRoundTrip_return")
+int uprobe_transportRoundTripReturn(struct pt_regs *ctx) {
+    bpf_dbg_printk("=== uprobe/proc http transport.RoundTrip return === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     bpf_dbg_printk("goroutine_addr %lx", goroutine_addr);
@@ -209,6 +234,13 @@ int uprobe_clientSendReturn(struct pt_regs *ctx) {
     if (invocation == NULL) {
         bpf_dbg_printk("can't read http invocation metadata");
         return 0;
+    }
+
+    traceparent_info *tp = bpf_map_lookup_elem(&tp_infos, &goroutine_addr);
+    bpf_map_delete_elem(&tp_infos, &goroutine_addr);
+
+    if (tp) {
+        bpf_dbg_printk("found traceparent info %s", tp->traceparent);
     }
 
     http_request_trace *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace), 0);
@@ -229,6 +261,12 @@ int uprobe_clientSendReturn(struct pt_regs *ctx) {
     // Get request/response struct
     void *req_ptr = GO_PARAM2(&(invocation->regs));
     void *resp_ptr = (void *)GO_PARAM1(ctx);
+
+    void *headers_ptr = NULL;
+    bpf_probe_read(&headers_ptr, sizeof(headers_ptr), (void*)(req_ptr + req_header_ptr_pos));
+    if (headers_ptr) {
+        bpf_map_delete_elem(&header_req_map, &headers_ptr);
+    }
 
     // Get method from Request.Method
     if (!read_go_str("method", req_ptr, method_ptr_pos, &trace->method, sizeof(trace->method))) {
@@ -265,7 +303,7 @@ int uprobe_clientSendReturn(struct pt_regs *ctx) {
         }
     }
 
-    bpf_printk("traceparent: %s", trace->traceparent);
+    bpf_printk("url: %s, req %llx", trace->path, (u64)req_ptr);
 
     bpf_probe_read(&trace->content_length, sizeof(trace->content_length), (void *)(req_ptr + content_length_ptr_pos));
 
@@ -284,6 +322,32 @@ int uprobe_writeSubset(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc header writeSubset === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
-    bpf_printk("goroutine_addr %lx", goroutine_addr);
+    void *header_addr = GO_PARAM1(ctx);
+    bpf_dbg_printk("goroutine_addr %lx, header ptr %llx", goroutine_addr, header_addr);
+
+    u64 *request_goaddr = bpf_map_lookup_elem(&header_req_map, &header_addr);
+
+    if (!request_goaddr) {
+        bpf_printk("Can't find parent go routine for %llx", goroutine_addr);
+        return 0;
+    }
+
+    u64 parent_goaddr = *request_goaddr;
+
+    traceparent_info *tp_info = bpf_map_lookup_elem(&tp_infos, &parent_goaddr);
+    if (tp_info) {
+        return 0;
+    }
+
+    bpf_dbg_printk("request goaddr %llx", (void*)parent_goaddr);
+
+    traceparent_info info = {
+        .flags = 0
+    };
+
+    struct span_context sc = generate_span_context();
+    span_context_to_w3c_string(&sc, info.traceparent);
+    bpf_map_update_elem(&tp_infos, &parent_goaddr, &info, BPF_ANY);
+
     return 0;
 }

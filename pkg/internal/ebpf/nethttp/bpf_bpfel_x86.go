@@ -45,6 +45,11 @@ type bpfGoroutineMetadata struct {
 	Timestamp uint64
 }
 
+type bpfTraceparentInfo struct {
+	Traceparent [55]uint8
+	Flags       uint8
+}
+
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -86,12 +91,12 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
-	UprobeServeHTTP           *ebpf.ProgramSpec `ebpf:"uprobe_ServeHTTP"`
-	UprobeWriteHeader         *ebpf.ProgramSpec `ebpf:"uprobe_WriteHeader"`
-	UprobeClientSend          *ebpf.ProgramSpec `ebpf:"uprobe_clientSend"`
-	UprobeClientSendReturn    *ebpf.ProgramSpec `ebpf:"uprobe_clientSendReturn"`
-	UprobeStartBackgroundRead *ebpf.ProgramSpec `ebpf:"uprobe_startBackgroundRead"`
-	UprobeWriteSubset         *ebpf.ProgramSpec `ebpf:"uprobe_writeSubset"`
+	UprobeServeHTTP                *ebpf.ProgramSpec `ebpf:"uprobe_ServeHTTP"`
+	UprobeWriteHeader              *ebpf.ProgramSpec `ebpf:"uprobe_WriteHeader"`
+	UprobeStartBackgroundRead      *ebpf.ProgramSpec `ebpf:"uprobe_startBackgroundRead"`
+	UprobeTransportRoundTrip       *ebpf.ProgramSpec `ebpf:"uprobe_transportRoundTrip"`
+	UprobeTransportRoundTripReturn *ebpf.ProgramSpec `ebpf:"uprobe_transportRoundTripReturn"`
+	UprobeWriteSubset              *ebpf.ProgramSpec `ebpf:"uprobe_writeSubset"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
@@ -100,10 +105,12 @@ type bpfProgramSpecs struct {
 type bpfMapSpecs struct {
 	Events                    *ebpf.MapSpec `ebpf:"events"`
 	GolangMapbucketStorageMap *ebpf.MapSpec `ebpf:"golang_mapbucket_storage_map"`
+	HeaderReqMap              *ebpf.MapSpec `ebpf:"header_req_map"`
 	Newproc1                  *ebpf.MapSpec `ebpf:"newproc1"`
 	OngoingGoroutines         *ebpf.MapSpec `ebpf:"ongoing_goroutines"`
 	OngoingHttpClientRequests *ebpf.MapSpec `ebpf:"ongoing_http_client_requests"`
 	OngoingServerRequests     *ebpf.MapSpec `ebpf:"ongoing_server_requests"`
+	TpInfos                   *ebpf.MapSpec `ebpf:"tp_infos"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -127,20 +134,24 @@ func (o *bpfObjects) Close() error {
 type bpfMaps struct {
 	Events                    *ebpf.Map `ebpf:"events"`
 	GolangMapbucketStorageMap *ebpf.Map `ebpf:"golang_mapbucket_storage_map"`
+	HeaderReqMap              *ebpf.Map `ebpf:"header_req_map"`
 	Newproc1                  *ebpf.Map `ebpf:"newproc1"`
 	OngoingGoroutines         *ebpf.Map `ebpf:"ongoing_goroutines"`
 	OngoingHttpClientRequests *ebpf.Map `ebpf:"ongoing_http_client_requests"`
 	OngoingServerRequests     *ebpf.Map `ebpf:"ongoing_server_requests"`
+	TpInfos                   *ebpf.Map `ebpf:"tp_infos"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
 		m.Events,
 		m.GolangMapbucketStorageMap,
+		m.HeaderReqMap,
 		m.Newproc1,
 		m.OngoingGoroutines,
 		m.OngoingHttpClientRequests,
 		m.OngoingServerRequests,
+		m.TpInfos,
 	)
 }
 
@@ -148,21 +159,21 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
-	UprobeServeHTTP           *ebpf.Program `ebpf:"uprobe_ServeHTTP"`
-	UprobeWriteHeader         *ebpf.Program `ebpf:"uprobe_WriteHeader"`
-	UprobeClientSend          *ebpf.Program `ebpf:"uprobe_clientSend"`
-	UprobeClientSendReturn    *ebpf.Program `ebpf:"uprobe_clientSendReturn"`
-	UprobeStartBackgroundRead *ebpf.Program `ebpf:"uprobe_startBackgroundRead"`
-	UprobeWriteSubset         *ebpf.Program `ebpf:"uprobe_writeSubset"`
+	UprobeServeHTTP                *ebpf.Program `ebpf:"uprobe_ServeHTTP"`
+	UprobeWriteHeader              *ebpf.Program `ebpf:"uprobe_WriteHeader"`
+	UprobeStartBackgroundRead      *ebpf.Program `ebpf:"uprobe_startBackgroundRead"`
+	UprobeTransportRoundTrip       *ebpf.Program `ebpf:"uprobe_transportRoundTrip"`
+	UprobeTransportRoundTripReturn *ebpf.Program `ebpf:"uprobe_transportRoundTripReturn"`
+	UprobeWriteSubset              *ebpf.Program `ebpf:"uprobe_writeSubset"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
 		p.UprobeServeHTTP,
 		p.UprobeWriteHeader,
-		p.UprobeClientSend,
-		p.UprobeClientSendReturn,
 		p.UprobeStartBackgroundRead,
+		p.UprobeTransportRoundTrip,
+		p.UprobeTransportRoundTripReturn,
 		p.UprobeWriteSubset,
 	)
 }
