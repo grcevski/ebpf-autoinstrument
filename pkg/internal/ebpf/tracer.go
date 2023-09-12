@@ -46,7 +46,11 @@ type Tracer interface {
 	SocketFilters() []*ebpf.Program
 	// Run will do the action of listening for eBPF traces and forward them
 	// periodically to the output channel.
-	Run(context.Context, chan<- []request.Span)
+	// It optionally receives the service name as a second attribute, to
+	// populate each forwarded span with its value. But some
+	// tracers might ignore it (e.g. system-wide HTTP filter will directly set the
+	// executable name of each request).
+	Run(context.Context, chan<- []request.Span, string)
 	// AddCloser adds io.Closer instances that need to be invoked when the
 	// Run function ends.
 	AddCloser(c ...io.Closer)
@@ -61,29 +65,41 @@ type ProcessTracer struct {
 	goffsets *goexec.Offsets
 	exe      *link.Executable
 	pinPath  string
+
+	systemWide          bool
+	overrideServiceName string
 }
 
 func (pt *ProcessTracer) Run(ctx context.Context, out chan<- []request.Span) {
 	var log = logger()
 
 	// Searches for traceable functions
-	funcs, err := pt.tracerFunctions()
+	trcrs, err := pt.tracers()
 	if err != nil {
 		log.Error("couldn't trace process", err, "path", pt.ELFInfo.CmdExePath, "pid", pt.ELFInfo.Pid)
 		return
 	}
+
+	svcName := pt.overrideServiceName
+	// If the user does not override the service name via configuration
+	// the service name is the name of the found executable
+	// Unless the case of system-wide tracing, where the name of the
+	// executable will be dynamically set for each traced http request call.
+	if svcName == "" && !pt.systemWide {
+		svcName = pt.ELFInfo.ExecutableName()
+	}
 	// run each tracer program
-	for _, fn := range funcs {
-		go fn(ctx, out)
+	for _, t := range trcrs {
+		go t.Run(ctx, out, svcName)
 	}
 }
 
-// tracerFunctions returns a tracing function for each discovered eBPF traceable source: GRPC, HTTP...
-func (pt *ProcessTracer) tracerFunctions() ([]func(context.Context, chan<- []request.Span), error) {
+// tracers returns Tracer implementer for each discovered eBPF traceable source: GRPC, HTTP...
+func (pt *ProcessTracer) tracers() ([]Tracer, error) {
 	var log = logger()
 
 	// tracerFuncs contains the eBPF programs (HTTP, GRPC tracers...)
-	var tracerFuncs []func(context.Context, chan<- []request.Span)
+	var tracers []Tracer
 
 	for _, p := range pt.programs {
 		plog := log.With("program", reflect.TypeOf(p))
@@ -131,10 +147,10 @@ func (pt *ProcessTracer) tracerFunctions() ([]func(context.Context, chan<- []req
 			return nil, err
 		}
 
-		tracerFuncs = append(tracerFuncs, p.Run)
+		tracers = append(tracers, p)
 	}
 
-	return tracerFuncs, nil
+	return tracers, nil
 }
 
 func logger() *slog.Logger { return slog.With("component", "ebpf.TracerProvider") }
@@ -194,11 +210,14 @@ func inspect(ctx context.Context, cfg *ebpfcommon.TracerConfig, functions []stri
 	var offsets *goexec.Offsets
 
 	if !cfg.SystemWide {
-		logger().Info("inspecting", "pid", execElf.Pid, "comm", execElf.CmdExePath)
-
-		offsets, err = goexec.InspectOffsets(&execElf, functions)
-		if err != nil {
-			logger().Info("Go HTTP/gRPC support not detected. Using only generic instrumentation.", "error", err)
+		if cfg.SkipGoSpecificTracers {
+			logger().Info("Skipping inspection for Go functions. Using only generic instrumentation.", "pid", execElf.Pid, "comm", execElf.CmdExePath)
+		} else {
+			logger().Info("inspecting", "pid", execElf.Pid, "comm", execElf.CmdExePath)
+			offsets, err = goexec.InspectOffsets(&execElf, functions)
+			if err != nil {
+				logger().Info("Go HTTP/gRPC support not detected. Using only generic instrumentation.", "error", err)
+			}
 		}
 	}
 
@@ -223,11 +242,17 @@ func inspectByPort(ctx context.Context, cfg *ebpfcommon.TracerConfig, functions 
 
 	// look for suitable Go application first
 	for _, execElf := range elfs {
-		logger().Info("inspecting", "pid", execElf.Pid, "comm", execElf.CmdExePath)
+		var offsets *goexec.Offsets
+		var err error
 
-		offsets, err := goexec.InspectOffsets(&execElf, functions)
+		if cfg.SkipGoSpecificTracers {
+			logger().Info("skipping inspection for Go functions", "pid", execElf.Pid, "comm", execElf.CmdExePath)
+		} else {
+			logger().Info("inspecting", "pid", execElf.Pid, "comm", execElf.CmdExePath)
+			offsets, err = goexec.InspectOffsets(&execElf, functions)
+		}
 
-		if err != nil {
+		if cfg.SkipGoSpecificTracers || err != nil {
 			fallBackInfos = append(fallBackInfos, execElf)
 			pidMap[execElf.Pid] = execElf
 			logger().Info("adding fall-back generic executable", "pid", execElf.Pid, "comm", execElf.CmdExePath)

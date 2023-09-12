@@ -55,9 +55,9 @@ the options for each component.
 The properties in this section are first-level YAML properties, as they apply to the
 whole Beyla configuration:
 
-| YAML           | Env var             | Type   | Default         |
-| -------------- | ------------------- | ------ | --------------- |
-| `service_name` | `OTEL_SERVICE_NAME` | string | executable name |
+| YAML           | Env var                               | Type   | Default         |
+| -------------- |---------------------------------------| ------ | --------------- |
+| `service_name` | `SERVICE_NAME` or `OTEL_SERVICE_NAME` | string | executable name |
 
 Specifies the name of the instrumented service to be reported by the metrics exporter.
 If unset, it will be the name of the executable of the service.
@@ -152,6 +152,13 @@ can help with reducing the CPU overhead of Beyla.
 
 In low-load services (in terms of requests/second), high values of `wakeup_len` could
 add a noticeable delay in the time the metrics are submitted and become externally visible.
+
+| YAML                       | Env var                    | Type    | Default |
+| -------------------------- | -------------------------- | ------- | ------- |
+| `skip_go_specific_tracers` | `SKIP_GO_SPECIFIC_TRACERS` | boolean | false   |
+
+Disables the detection of Go specifics when ebpf tracer inspects executables to be instrumented.
+The tracer will fallback to using generic instrumentation, which will generally be less efficient.
 
 ## Routes decorator
 
@@ -390,13 +397,6 @@ format. It will be enabled if the `port` property is set.
 
 Specifies the HTTP port for the Prometheus scrape endpoint. If unset or 0,
 no Prometheus endpoint will be open.
-
-| YAML           | Env var                   | Type   | Default         |
-| -------------- | ------------------------- | ------ | --------------- |
-| `service_name` | `PROMETHEUS_SERVICE_NAME` | string | executable path |
-
-Specifies the name of the instrumented service to be reported by the metrics exporter.
-If unset, it will be the path of the instrumented service (e.g. `/usr/local/bin/service`).
 
 | YAML   | Env var           | Type   | Default    |
 | ------ | ----------------- | ------ | ---------- |
