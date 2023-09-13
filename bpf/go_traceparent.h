@@ -78,7 +78,7 @@ struct span_context {
     unsigned char SpanID[SPAN_ID_SIZE];
 };
 
-static __always_inline int bpf_memcmp(char *s1, char *s2, s32 size)
+static __always_inline int bpf_memcmp1(char *s1, char *s2, s32 size)
 {
     for (int i = 0; i < size; i++)
     {
@@ -203,7 +203,7 @@ static __always_inline void *extract_traceparent_from_req_headers(void *headers_
             }
             char current_header_key[W3C_KEY_LENGTH];
             bpf_probe_read(current_header_key, sizeof(current_header_key), map_value->keys[i].str);
-            if (!bpf_memcmp(current_header_key, "Traceparent", W3C_KEY_LENGTH)) // Golang request will normalize the header key to always be "Traceparent"
+            if (!bpf_memcmp1(current_header_key, "Traceparent", W3C_KEY_LENGTH)) // Golang request will normalize the header key to always be "Traceparent"
             {
                 continue;
             }

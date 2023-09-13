@@ -17,6 +17,7 @@
 #include "go_common.h"
 #include "go_nethttp.h"
 #include "go_traceparent.h"
+#include "bpf_builtins.h"
 
 #define CLIENT_FLAG_NEW 0x1
 
@@ -200,7 +201,7 @@ int uprobe_transportRoundTrip(struct pt_regs *ctx) {
     void *req_ptr = GO_PARAM2(ctx);
     bpf_dbg_printk("goroutine_addr %lx, req ptr %llx", goroutine_addr, req_ptr);
 
-    void *headers_ptr = NULL;
+    void *headers_ptr = 0;
     bpf_probe_read(&headers_ptr, sizeof(headers_ptr), (void*)(req_ptr + req_header_ptr_pos));
     bpf_dbg_printk("goroutine_addr %lx, req ptr %llx, headers_ptr %llx", goroutine_addr, req_ptr, headers_ptr);
 
@@ -321,14 +322,14 @@ SEC("uprobe/header_writeSubset")
 int uprobe_writeSubset(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc header writeSubset === ");
 
-    void *goroutine_addr = GOROUTINE_PTR(ctx);
     void *header_addr = GO_PARAM1(ctx);
-    bpf_dbg_printk("goroutine_addr %lx, header ptr %llx", goroutine_addr, header_addr);
+    void *io_writer_addr = GO_PARAM3(ctx);
+    bpf_dbg_printk("goroutine_addr %lx, header ptr %llx", GOROUTINE_PTR(ctx), header_addr);
 
     u64 *request_goaddr = bpf_map_lookup_elem(&header_req_map, &header_addr);
 
     if (!request_goaddr) {
-        bpf_printk("Can't find parent go routine for %llx", goroutine_addr);
+        bpf_dbg_printk("Can't find parent go routine for header %llx", header_addr);
         return 0;
     }
 
@@ -348,6 +349,30 @@ int uprobe_writeSubset(struct pt_regs *ctx) {
     struct span_context sc = generate_span_context();
     span_context_to_w3c_string(&sc, info.traceparent);
     bpf_map_update_elem(&tp_infos, &parent_goaddr, &info, BPF_ANY);
+
+
+    void *buf_ptr = 0;
+    bpf_probe_read(&buf_ptr, sizeof(buf_ptr), (void *)(io_writer_addr + io_writer_buf_ptr_pos));
+    if (!buf_ptr) {
+        return 0;
+    }
+    
+    s64 size = 0;
+    bpf_probe_read(&size, sizeof(s64), (void *)(io_writer_addr + io_writer_buf_ptr_pos + 8)); // grab size
+
+    s64 len = 0;
+    bpf_probe_read(&len, sizeof(s64), (void *)(io_writer_addr + io_writer_n_pos)); // grab len
+
+
+    bpf_dbg_printk("buf_ptr %llx, len=%d, size=%d", (void*)buf_ptr, len, size);
+
+    if (len < (size - W3C_VAL_LENGTH - W3C_KEY_LENGTH - 4)) { // 4 = :<space>\r\n
+        char key[18] = "Traceparent: a\r\n";
+        //char *end = "\r\n";
+        //__bpf_memcpy(&buf_ptr, &key, sizeof(key));
+        //__bpf_memcpy(&buf_ptr + sizeof(key), &end, sizeof(end));
+        bpf_probe_write_user((void*)GO_PARAM3(ctx), key, sizeof(key));
+    }
 
     return 0;
 }

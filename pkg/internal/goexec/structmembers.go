@@ -101,6 +101,13 @@ var structMembers = map[string]structInfo{
 			"target": "grpc_client_target_ptr_pos",
 		},
 	},
+	"bufio.Writer": {
+		lib: "go",
+		fields: map[string]string{
+			"buf": "io_writer_buf_ptr_pos",
+			"n":   "io_writer_n_pos",
+		},
+	},
 }
 
 func structMemberOffsets(elfFile *elf.File) (FieldOffsets, error) {
@@ -197,6 +204,7 @@ func structMemberOffsetsFromDwarf(data *dwarf.Data) (FieldOffsets, map[string]st
 			reader.SkipChildren()
 			continue
 		} else { //nolint:revive
+			//fmt.Printf("attrs %v\n\n---\n\n", attrs)
 			log.Debug("inspecting fields for struct type", "type", typeName)
 			if err := readMembers(reader, structMember.fields, expectedReturns, fieldOffsets); err != nil {
 				log.Debug("error reading DRWARF info", "type", typeName, "members", err)
@@ -225,6 +233,7 @@ func readMembers(
 			return nil
 		}
 		attrs := getAttrs(entry)
+		//fmt.Printf("%v\n", attrs)
 		if constName, ok := fields[attrs[dwarf.AttrName].(string)]; ok {
 			delete(expectedReturns, constName)
 			value := attrs[dwarf.AttrDataMemberLoc]

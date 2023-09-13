@@ -24,6 +24,10 @@
       "net.TCPAddr": [
         "IP",
         "Port"
+      ],
+      "io.Writer": [
+        "buf",
+        "n"
       ]
     }
   },
