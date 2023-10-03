@@ -225,6 +225,13 @@ int uprobe_roundTrip(struct pt_regs *ctx) {
     }
 
     if (headers_ptr) {
+        void *traceparent_ptr = extract_traceparent_from_req_headers((void*)(req_ptr + req_header_ptr_pos));
+
+        if (traceparent_ptr) {
+            bpf_dbg_printk("Traceparent %s found in headers, skipping generation", traceparent_ptr);
+            return 0;
+        }
+
         bpf_map_update_elem(&header_req_map, &headers_ptr, &goroutine_addr, BPF_ANY);
     }
 
@@ -248,10 +255,6 @@ int uprobe_roundTripReturn(struct pt_regs *ctx) {
 
     traceparent_info *tp = bpf_map_lookup_elem(&tp_infos, &goroutine_addr);
     bpf_map_delete_elem(&tp_infos, &goroutine_addr);
-
-    if (tp) {
-        bpf_dbg_printk("found traceparent info %s", tp->traceparent);
-    }
 
     http_request_trace *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace), 0);
     if (!trace) {
@@ -302,14 +305,19 @@ int uprobe_roundTripReturn(struct pt_regs *ctx) {
         return 0;
     }
 
-    // Get traceparent from the Request.Header
-    void *traceparent_ptr = extract_traceparent_from_req_headers((void*)(req_ptr + req_header_ptr_pos));
-    if (traceparent_ptr != NULL) {
-        long res = bpf_probe_read(trace->traceparent, sizeof(trace->traceparent), traceparent_ptr);
-        if (res < 0) {
-            bpf_printk("can't copy traceparent header");
-            bpf_ringbuf_discard(trace, 0);
-            return 0;
+    if (tp) {
+        bpf_dbg_printk("found traceparent info %s", tp->traceparent);
+        bpf_probe_read(trace->traceparent, sizeof(tp->traceparent), tp->traceparent);
+    } else {
+        // Get traceparent from the Request.Header
+        void *traceparent_ptr = extract_traceparent_from_req_headers((void*)(req_ptr + req_header_ptr_pos));
+        if (traceparent_ptr != NULL) {
+            long res = bpf_probe_read(trace->traceparent, sizeof(trace->traceparent), traceparent_ptr);
+            if (res < 0) {
+                bpf_printk("can't copy traceparent header");
+                bpf_ringbuf_discard(trace, 0);
+                return 0;
+            }
         }
     }
 
@@ -333,6 +341,7 @@ int uprobe_writeSubset(struct pt_regs *ctx) {
 
     void *header_addr = GO_PARAM1(ctx);
     void *io_writer_addr = GO_PARAM3(ctx);
+
     bpf_dbg_printk("goroutine_addr %lx, header ptr %llx", GOROUTINE_PTR(ctx), header_addr);
 
     u64 *request_goaddr = bpf_map_lookup_elem(&header_req_map, &header_addr);
@@ -359,7 +368,6 @@ int uprobe_writeSubset(struct pt_regs *ctx) {
     span_context_to_w3c_string(&sc, info.traceparent);
     bpf_map_update_elem(&tp_infos, &parent_goaddr, &info, BPF_ANY);
 
-
     void *buf_ptr = 0;
     bpf_probe_read(&buf_ptr, sizeof(buf_ptr), (void *)(io_writer_addr + io_writer_buf_ptr_pos));
     if (!buf_ptr) {
@@ -372,15 +380,18 @@ int uprobe_writeSubset(struct pt_regs *ctx) {
     s64 len = 0;
     bpf_probe_read(&len, sizeof(s64), (void *)(io_writer_addr + io_writer_n_pos)); // grab len
 
-
     bpf_dbg_printk("buf_ptr %llx, len=%d, size=%d", (void*)buf_ptr, len, size);
 
     if (len < (size - W3C_VAL_LENGTH - W3C_KEY_LENGTH - 4)) { // 4 = :<space>\r\n
-        char key[18] = "Traceparent: a\r\n";
-        //char *end = "\r\n";
-        //__bpf_memcpy(&buf_ptr, &key, sizeof(key));
-        //__bpf_memcpy(&buf_ptr + sizeof(key), &end, sizeof(end));
-        bpf_probe_write_user((void*)GO_PARAM3(ctx), key, sizeof(key));
+        char key[W3C_KEY_LENGTH + 2] = "Traceparent: ";
+        char end[2] = "\r\n";
+        bpf_probe_write_user(buf_ptr + (len & 0x0ffff), key, sizeof(key));
+        len += W3C_KEY_LENGTH + 2;
+        bpf_probe_write_user(buf_ptr + (len & 0x0ffff), info.traceparent, sizeof(info.traceparent));
+        len += W3C_VAL_LENGTH;
+        bpf_probe_write_user(buf_ptr + (len & 0x0ffff), end, sizeof(end));
+        len += 2;
+        bpf_probe_write_user((void *)(io_writer_addr + io_writer_n_pos), &len, sizeof(len));
     }
 
     return 0;

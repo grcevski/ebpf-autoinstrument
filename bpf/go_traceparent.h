@@ -174,3 +174,59 @@ static __always_inline void *extract_traceparent_from_req_headers(void *headers_
     }
     return NULL;
 }
+
+static __always_inline void generate_random_bytes(unsigned char *buff, u32 size)
+{
+    for (int i = 0; i < (size / 4); i++)
+    {
+        u32 random = bpf_get_prandom_u32();
+        buff[(4 * i)] = (random >> 24) & 0xFF;
+        buff[(4 * i) + 1] = (random >> 16) & 0xFF;
+        buff[(4 * i) + 2] = (random >> 8) & 0xFF;
+        buff[(4 * i) + 3] = random & 0xFF;
+    }
+}
+
+char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+static __always_inline void bytes_to_hex_string(unsigned char *pin, u32 size, unsigned char *out)
+{
+    unsigned char *pout = out;
+    for (u32 i = 0; i < size; i++)
+    {
+        *pout++ = hex[(*pin >> 4) & 0xF];
+        *pout++ = hex[(*pin++) & 0xF];
+    }
+}
+
+static __always_inline struct span_context generate_span_context()
+{
+    struct span_context context = {};
+    generate_random_bytes(context.TraceID, TRACE_ID_SIZE);
+    generate_random_bytes(context.SpanID, SPAN_ID_SIZE);
+    return context;
+}
+
+static __always_inline void span_context_to_w3c_string(struct span_context *ctx, unsigned char *buff)
+{
+    // W3C format: version (2 chars) - trace id (32 chars) - span id (16 chars) - sampled (2 chars)
+    unsigned char *out = buff;
+
+    // Write version
+    *out++ = '0';
+    *out++ = '0';
+    *out++ = '-';
+
+    // Write trace id
+    bytes_to_hex_string(ctx->TraceID, TRACE_ID_SIZE, out);
+    out += TRACE_ID_STRING_SIZE;
+    *out++ = '-';
+
+    // Write span id
+    bytes_to_hex_string(ctx->SpanID, SPAN_ID_SIZE, out);
+    out += SPAN_ID_STRING_SIZE;
+    *out++ = '-';
+
+    // Write sampled
+    *out++ = '0';
+    *out = '1';
+}
