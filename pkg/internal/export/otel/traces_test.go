@@ -13,6 +13,9 @@ import (
 	"github.com/mariomac/pipes/pkg/node"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	trace2 "go.opentelemetry.io/otel/trace"
 
 	"github.com/grafana/beyla/pkg/internal/imetrics"
@@ -20,105 +23,146 @@ import (
 	"github.com/grafana/beyla/pkg/internal/request"
 )
 
-func TestTracesEndpoint(t *testing.T) {
+func TestHTTPTracesEndpoint(t *testing.T) {
+	defer restoreEnvAfterExecution()()
 	tcfg := TracesConfig{
-		Endpoint:           "https://localhost:3131",
-		TracesEndpoint:     "https://localhost:3232",
-		MaxQueueSize:       4096,
-		MaxExportBatchSize: 4096,
-		SamplingRatio:      1.0,
+		CommonEndpoint: "https://localhost:3131",
+		TracesEndpoint: "https://localhost:3232/v1/traces",
 	}
 
 	t.Run("testing with two endpoints", func(t *testing.T) {
-		testHTTPTracesEndpLen(t, 1, &tcfg)
+		testHTTPTracesOptions(t, otlpOptions{Endpoint: "localhost:3232", URLPath: "/v1/traces"}, &tcfg)
 	})
 
 	tcfg = TracesConfig{
-		TracesEndpoint:     "https://localhost:3232",
-		MaxQueueSize:       4096,
-		MaxExportBatchSize: 4096,
-		SamplingRatio:      1.0,
+		CommonEndpoint: "https://localhost:3131/otlp",
 	}
 
-	t.Run("testing with only trace endpoint", func(t *testing.T) {
-		testHTTPTracesEndpLen(t, 1, &tcfg)
+	t.Run("testing with only common endpoint", func(t *testing.T) {
+		testHTTPTracesOptions(t, otlpOptions{Endpoint: "localhost:3131", URLPath: "/otlp/v1/traces"}, &tcfg)
 	})
 
-	tcfg.Endpoint = "https://localhost:3131"
-	tcfg.TracesEndpoint = ""
-
-	t.Run("testing with only non-signal endpoint", func(t *testing.T) {
-		testHTTPTracesEndpLen(t, 1, &tcfg)
-	})
-
-	tcfg.Endpoint = "http://localhost:3131"
+	tcfg = TracesConfig{
+		CommonEndpoint: "https://localhost:3131",
+		TracesEndpoint: "http://localhost:3232",
+	}
 	t.Run("testing with insecure endpoint", func(t *testing.T) {
-		testHTTPTracesEndpLen(t, 2, &tcfg)
+		testHTTPTracesOptions(t, otlpOptions{Endpoint: "localhost:3232", Insecure: true}, &tcfg)
 	})
 
-	tcfg.Endpoint = "http://localhost:3131/path_to_endpoint"
-	t.Run("testing with insecure endpoint and path", func(t *testing.T) {
-		testHTTPTracesEndpLen(t, 3, &tcfg)
-	})
+	tcfg = TracesConfig{
+		CommonEndpoint:     "https://localhost:3232",
+		InsecureSkipVerify: true,
+	}
 
-	tcfg.Endpoint = "http://localhost:3131/v1/traces"
-	t.Run("testing with insecure endpoint and containing v1/traces", func(t *testing.T) {
-		testHTTPTracesEndpLen(t, 2, &tcfg)
+	t.Run("testing with skip TLS verification", func(t *testing.T) {
+		testHTTPTracesOptions(t, otlpOptions{Endpoint: "localhost:3232", URLPath: "/v1/traces", SkipTLSVerify: true}, &tcfg)
 	})
 }
 
-func testHTTPTracesEndpLen(t *testing.T, expected int, tcfg *TracesConfig) {
+func testHTTPTracesOptions(t *testing.T, expected otlpOptions, tcfg *TracesConfig) {
+	defer restoreEnvAfterExecution()()
 	opts, err := getHTTPTracesEndpointOptions(tcfg)
 	require.NoError(t, err)
-	// otlptracehttp.Options are notoriously hard to compare, so we just test the length
-	assert.Equal(t, expected, len(opts))
+	assert.Equal(t, expected, opts)
 }
 
 func TestMissingSchemeInHTTPTracesEndpoint(t *testing.T) {
-	opts, err := getHTTPTracesEndpointOptions(&TracesConfig{Endpoint: "http://foo:3030", SamplingRatio: 1.0})
+	defer restoreEnvAfterExecution()()
+	opts, err := getHTTPTracesEndpointOptions(&TracesConfig{CommonEndpoint: "http://foo:3030", SamplingRatio: 1.0})
 	require.NoError(t, err)
 	require.NotEmpty(t, opts)
 
-	_, err = getHTTPTracesEndpointOptions(&TracesConfig{Endpoint: "foo:3030", SamplingRatio: 1.0})
+	_, err = getHTTPTracesEndpointOptions(&TracesConfig{CommonEndpoint: "foo:3030", SamplingRatio: 1.0})
 	require.Error(t, err)
 
-	_, err = getHTTPTracesEndpointOptions(&TracesConfig{Endpoint: "foo", SamplingRatio: 1.0})
+	_, err = getHTTPTracesEndpointOptions(&TracesConfig{CommonEndpoint: "foo", SamplingRatio: 1.0})
 	require.Error(t, err)
 }
 
 func TestGRPCTracesEndpointOptions(t *testing.T) {
+	defer restoreEnvAfterExecution()()
 	t.Run("do not accept URLs without a scheme", func(t *testing.T) {
-		_, err := getGRPCTracesEndpointOptions(&TracesConfig{Endpoint: "foo:3939", SamplingRatio: 1.0})
+		_, err := getGRPCTracesEndpointOptions(&TracesConfig{CommonEndpoint: "foo:3939", SamplingRatio: 1.0})
 		assert.Error(t, err)
 	})
-	t.Run("handles insecure skip verification", func(t *testing.T) {
-		opts, err := getGRPCTracesEndpointOptions(&TracesConfig{
-			Endpoint:           "http://foo:3939",
-			InsecureSkipVerify: true,
-			SamplingRatio:      1.0,
-		})
-		assert.NoError(t, err)
-		assert.Len(t, opts, 3) // host, insecure, insecure skip
+	tcfg := TracesConfig{
+		CommonEndpoint: "https://localhost:3131",
+		TracesEndpoint: "https://localhost:3232",
+	}
+
+	t.Run("testing with two endpoints", func(t *testing.T) {
+		testTracesGRPOptions(t, otlpOptions{Endpoint: "localhost:3232"}, &tcfg)
 	})
+
+	tcfg = TracesConfig{
+		CommonEndpoint: "https://localhost:3131",
+	}
+
+	t.Run("testing with only common endpoint", func(t *testing.T) {
+		testTracesGRPOptions(t, otlpOptions{Endpoint: "localhost:3131"}, &tcfg)
+	})
+
+	tcfg = TracesConfig{
+		CommonEndpoint: "https://localhost:3131",
+		TracesEndpoint: "http://localhost:3232",
+	}
+	t.Run("testing with insecure endpoint", func(t *testing.T) {
+		testTracesGRPOptions(t, otlpOptions{Endpoint: "localhost:3232", Insecure: true}, &tcfg)
+	})
+
+	tcfg = TracesConfig{
+		CommonEndpoint:     "https://localhost:3232",
+		InsecureSkipVerify: true,
+	}
+
+	t.Run("testing with skip TLS verification", func(t *testing.T) {
+		testTracesGRPOptions(t, otlpOptions{Endpoint: "localhost:3232", SkipTLSVerify: true}, &tcfg)
+	})
+}
+
+func testTracesGRPOptions(t *testing.T, expected otlpOptions, tcfg *TracesConfig) {
+	defer restoreEnvAfterExecution()()
+	opts, err := getGRPCTracesEndpointOptions(tcfg)
+	require.NoError(t, err)
+	assert.Equal(t, expected, opts)
 }
 
 func TestTracesSetupHTTP_Protocol(t *testing.T) {
 	testCases := []struct {
+		Endpoint              string
 		ProtoVal              Protocol
 		TraceProtoVal         Protocol
 		ExpectedProtoEnv      string
 		ExpectedTraceProtoEnv string
 	}{
-		{ProtoVal: "", TraceProtoVal: "", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: ""},
+		{ProtoVal: "", TraceProtoVal: "", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "http/protobuf"},
 		{ProtoVal: "", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
 		{ProtoVal: "bar", TraceProtoVal: "", ExpectedProtoEnv: "bar", ExpectedTraceProtoEnv: ""},
 		{ProtoVal: "bar", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
+		{Endpoint: "http://foo:4317", ProtoVal: "", TraceProtoVal: "", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "grpc"},
+		{Endpoint: "http://foo:4317", ProtoVal: "", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
+		{Endpoint: "http://foo:4317", ProtoVal: "bar", TraceProtoVal: "", ExpectedProtoEnv: "bar", ExpectedTraceProtoEnv: ""},
+		{Endpoint: "http://foo:4317", ProtoVal: "bar", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
+		{Endpoint: "http://foo:14317", ProtoVal: "", TraceProtoVal: "", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "grpc"},
+		{Endpoint: "http://foo:14317", ProtoVal: "", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
+		{Endpoint: "http://foo:14317", ProtoVal: "bar", TraceProtoVal: "", ExpectedProtoEnv: "bar", ExpectedTraceProtoEnv: ""},
+		{Endpoint: "http://foo:14317", ProtoVal: "bar", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
+		{Endpoint: "http://foo:4318", ProtoVal: "", TraceProtoVal: "", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "http/protobuf"},
+		{Endpoint: "http://foo:4318", ProtoVal: "", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
+		{Endpoint: "http://foo:4318", ProtoVal: "bar", TraceProtoVal: "", ExpectedProtoEnv: "bar", ExpectedTraceProtoEnv: ""},
+		{Endpoint: "http://foo:4318", ProtoVal: "bar", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
+		{Endpoint: "http://foo:24318", ProtoVal: "", TraceProtoVal: "", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "http/protobuf"},
+		{Endpoint: "http://foo:24318", ProtoVal: "", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
+		{Endpoint: "http://foo:24318", ProtoVal: "bar", TraceProtoVal: "", ExpectedProtoEnv: "bar", ExpectedTraceProtoEnv: ""},
+		{Endpoint: "http://foo:24318", ProtoVal: "bar", TraceProtoVal: "foo", ExpectedProtoEnv: "", ExpectedTraceProtoEnv: "foo"},
 	}
 	for _, tc := range testCases {
-		t.Run(string(tc.ProtoVal)+"/"+string(tc.TraceProtoVal), func(t *testing.T) {
+		t.Run(tc.Endpoint+"/"+string(tc.ProtoVal)+"/"+string(tc.TraceProtoVal), func(t *testing.T) {
 			defer restoreEnvAfterExecution()()
 			_, err := getHTTPTracesEndpointOptions(&TracesConfig{
-				Endpoint:       "http://host:3333",
+				CommonEndpoint: "http://host:3333",
+				TracesEndpoint: tc.Endpoint,
 				Protocol:       tc.ProtoVal,
 				TracesProtocol: tc.TraceProtoVal,
 				SamplingRatio:  1.0,
@@ -131,12 +175,13 @@ func TestTracesSetupHTTP_Protocol(t *testing.T) {
 }
 
 func TestTracesSetupHTTP_DoNotOverrideEnv(t *testing.T) {
+	defer restoreEnvAfterExecution()()
 	t.Run("setting both variables", func(t *testing.T) {
 		defer restoreEnvAfterExecution()()
 		require.NoError(t, os.Setenv(envProtocol, "foo-proto"))
 		require.NoError(t, os.Setenv(envTracesProtocol, "bar-proto"))
 		_, err := getHTTPTracesEndpointOptions(&TracesConfig{
-			Endpoint:       "http://host:3333",
+			CommonEndpoint: "http://host:3333",
 			Protocol:       "foo",
 			TracesProtocol: "bar",
 			SamplingRatio:  1.0,
@@ -149,9 +194,9 @@ func TestTracesSetupHTTP_DoNotOverrideEnv(t *testing.T) {
 		defer restoreEnvAfterExecution()()
 		require.NoError(t, os.Setenv(envProtocol, "foo-proto"))
 		_, err := getHTTPTracesEndpointOptions(&TracesConfig{
-			Endpoint:      "http://host:3333",
-			Protocol:      "foo",
-			SamplingRatio: 1.0,
+			CommonEndpoint: "http://host:3333",
+			Protocol:       "foo",
+			SamplingRatio:  1.0,
 		})
 		require.NoError(t, err)
 		_, ok := os.LookupEnv(envTracesProtocol)
@@ -161,6 +206,7 @@ func TestTracesSetupHTTP_DoNotOverrideEnv(t *testing.T) {
 }
 
 func TestTraces_InternalInstrumentation(t *testing.T) {
+	defer restoreEnvAfterExecution()()
 	// fake OTEL collector server
 	coll := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusOK)
@@ -185,7 +231,7 @@ func TestTraces_InternalInstrumentation(t *testing.T) {
 	internalTraces := &fakeInternalTraces{}
 	exporter, err := ReportTraces(context.Background(),
 		&TracesConfig{
-			Endpoint:          coll.URL,
+			CommonEndpoint:    coll.URL,
 			BatchTimeout:      10 * time.Millisecond,
 			ExportTimeout:     5 * time.Second,
 			SamplingRatio:     1.0,
@@ -196,7 +242,7 @@ func TestTraces_InternalInstrumentation(t *testing.T) {
 			Metrics:     internalTraces,
 		})
 	require.NoError(t, err)
-	inputNode.SendsTo(node.AsTerminal(exporter))
+	inputNode.SendTo(node.AsTerminal(exporter))
 
 	go inputNode.Start()
 
@@ -253,6 +299,7 @@ func TestTraces_InternalInstrumentation(t *testing.T) {
 }
 
 func TestTraces_InternalInstrumentationSampling(t *testing.T) {
+	defer restoreEnvAfterExecution()()
 	// fake OTEL collector server
 	coll := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusOK)
@@ -277,7 +324,7 @@ func TestTraces_InternalInstrumentationSampling(t *testing.T) {
 	internalTraces := &fakeInternalTraces{}
 	exporter, err := ReportTraces(context.Background(),
 		&TracesConfig{
-			Endpoint:          coll.URL,
+			CommonEndpoint:    coll.URL,
 			BatchTimeout:      10 * time.Millisecond,
 			ExportTimeout:     5 * time.Second,
 			SamplingRatio:     0.0, // sampling 0 means we won't generate any samples
@@ -288,7 +335,7 @@ func TestTraces_InternalInstrumentationSampling(t *testing.T) {
 			Metrics:     internalTraces,
 		})
 	require.NoError(t, err)
-	inputNode.SendsTo(node.AsTerminal(exporter))
+	inputNode.SendTo(node.AsTerminal(exporter))
 
 	go inputNode.Start()
 
@@ -420,4 +467,112 @@ func TestTraces_Traceparent(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestTraces_HTTPStatus(t *testing.T) {
+	type testPair struct {
+		httpCode   int
+		statusCode codes.Code
+	}
+
+	t.Run("HTTP server testing", func(t *testing.T) {
+		for _, p := range []testPair{
+			{100, codes.Unset},
+			{103, codes.Unset},
+			{199, codes.Unset},
+			{200, codes.Unset},
+			{204, codes.Unset},
+			{299, codes.Unset},
+			{300, codes.Unset},
+			{399, codes.Unset},
+			{400, codes.Unset},
+			{404, codes.Unset},
+			{405, codes.Unset},
+			{499, codes.Unset},
+			{500, codes.Error},
+			{5999, codes.Error},
+		} {
+			assert.Equal(t, p.statusCode, httpSpanStatusCode(&request.Span{Status: p.httpCode, Type: request.EventTypeHTTP}))
+			assert.Equal(t, p.statusCode, spanStatusCode(&request.Span{Status: p.httpCode, Type: request.EventTypeHTTP}))
+		}
+	})
+
+	t.Run("HTTP client testing", func(t *testing.T) {
+		for _, p := range []testPair{
+			{100, codes.Unset},
+			{103, codes.Unset},
+			{199, codes.Unset},
+			{200, codes.Unset},
+			{204, codes.Unset},
+			{299, codes.Unset},
+			{300, codes.Unset},
+			{399, codes.Unset},
+			{400, codes.Error},
+			{404, codes.Error},
+			{405, codes.Error},
+			{499, codes.Error},
+			{500, codes.Error},
+			{5999, codes.Error},
+		} {
+			assert.Equal(t, p.statusCode, httpSpanStatusCode(&request.Span{Status: p.httpCode, Type: request.EventTypeHTTPClient}))
+			assert.Equal(t, p.statusCode, spanStatusCode(&request.Span{Status: p.httpCode, Type: request.EventTypeHTTPClient}))
+		}
+	})
+}
+
+func TestTraces_GRPCStatus(t *testing.T) {
+	type testPair struct {
+		grpcCode   attribute.KeyValue
+		statusCode codes.Code
+	}
+
+	t.Run("gRPC server testing", func(t *testing.T) {
+		for _, p := range []testPair{
+			{semconv.RPCGRPCStatusCodeOk, codes.Unset},
+			{semconv.RPCGRPCStatusCodeCancelled, codes.Unset},
+			{semconv.RPCGRPCStatusCodeUnknown, codes.Error},
+			{semconv.RPCGRPCStatusCodeInvalidArgument, codes.Unset},
+			{semconv.RPCGRPCStatusCodeDeadlineExceeded, codes.Error},
+			{semconv.RPCGRPCStatusCodeNotFound, codes.Unset},
+			{semconv.RPCGRPCStatusCodeAlreadyExists, codes.Unset},
+			{semconv.RPCGRPCStatusCodePermissionDenied, codes.Unset},
+			{semconv.RPCGRPCStatusCodeResourceExhausted, codes.Unset},
+			{semconv.RPCGRPCStatusCodeFailedPrecondition, codes.Unset},
+			{semconv.RPCGRPCStatusCodeAborted, codes.Unset},
+			{semconv.RPCGRPCStatusCodeOutOfRange, codes.Unset},
+			{semconv.RPCGRPCStatusCodeUnimplemented, codes.Error},
+			{semconv.RPCGRPCStatusCodeInternal, codes.Error},
+			{semconv.RPCGRPCStatusCodeUnavailable, codes.Error},
+			{semconv.RPCGRPCStatusCodeDataLoss, codes.Error},
+			{semconv.RPCGRPCStatusCodeUnauthenticated, codes.Unset},
+		} {
+			assert.Equal(t, p.statusCode, grpcSpanStatusCode(&request.Span{Status: int(p.grpcCode.Value.AsInt64()), Type: request.EventTypeGRPC}))
+			assert.Equal(t, p.statusCode, spanStatusCode(&request.Span{Status: int(p.grpcCode.Value.AsInt64()), Type: request.EventTypeGRPC}))
+		}
+	})
+
+	t.Run("gRPC client testing", func(t *testing.T) {
+		for _, p := range []testPair{
+			{semconv.RPCGRPCStatusCodeOk, codes.Unset},
+			{semconv.RPCGRPCStatusCodeCancelled, codes.Error},
+			{semconv.RPCGRPCStatusCodeUnknown, codes.Error},
+			{semconv.RPCGRPCStatusCodeInvalidArgument, codes.Error},
+			{semconv.RPCGRPCStatusCodeDeadlineExceeded, codes.Error},
+			{semconv.RPCGRPCStatusCodeNotFound, codes.Error},
+			{semconv.RPCGRPCStatusCodeAlreadyExists, codes.Error},
+			{semconv.RPCGRPCStatusCodePermissionDenied, codes.Error},
+			{semconv.RPCGRPCStatusCodeResourceExhausted, codes.Error},
+			{semconv.RPCGRPCStatusCodeFailedPrecondition, codes.Error},
+			{semconv.RPCGRPCStatusCodeAborted, codes.Error},
+			{semconv.RPCGRPCStatusCodeOutOfRange, codes.Error},
+			{semconv.RPCGRPCStatusCodeUnimplemented, codes.Error},
+			{semconv.RPCGRPCStatusCodeInternal, codes.Error},
+			{semconv.RPCGRPCStatusCodeUnavailable, codes.Error},
+			{semconv.RPCGRPCStatusCodeDataLoss, codes.Error},
+			{semconv.RPCGRPCStatusCodeUnauthenticated, codes.Error},
+		} {
+			assert.Equal(t, p.statusCode, grpcSpanStatusCode(&request.Span{Status: int(p.grpcCode.Value.AsInt64()), Type: request.EventTypeGRPCClient}))
+			assert.Equal(t, p.statusCode, spanStatusCode(&request.Span{Status: int(p.grpcCode.Value.AsInt64()), Type: request.EventTypeGRPCClient}))
+		}
+	})
 }

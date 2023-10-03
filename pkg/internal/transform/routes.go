@@ -2,10 +2,9 @@
 package transform
 
 import (
-	"context"
+	"log/slog"
 
 	"github.com/mariomac/pipes/pkg/node"
-	"golang.org/x/exp/slog"
 
 	"github.com/grafana/beyla/pkg/internal/request"
 	"github.com/grafana/beyla/pkg/internal/transform/route"
@@ -25,7 +24,7 @@ const (
 	UnmatchDefault = UnmatchWildcard
 )
 
-const wildCard = "*"
+const wildCard = "/**"
 
 // RoutesConfig allows grouping URLs sharing a given pattern.
 type RoutesConfig struct {
@@ -35,7 +34,7 @@ type RoutesConfig struct {
 	Patterns []string `yaml:"patterns"`
 }
 
-func RoutesProvider(_ context.Context, rc *RoutesConfig) (node.MiddleFunc[[]request.Span, []request.Span], error) {
+func RoutesProvider(rc *RoutesConfig) (node.MiddleFunc[[]request.Span, []request.Span], error) {
 	// set default value for Unmatch action
 	var unmatchAction func(span *request.Span)
 	switch rc.Unmatch {

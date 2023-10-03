@@ -21,68 +21,65 @@ import (
 
 const timeout = 5 * time.Second
 
-func TestMetricsEndpoint(t *testing.T) {
+func TestHTTPMetricsEndpointOPtions(t *testing.T) {
+	defer restoreEnvAfterExecution()()
 	mcfg := MetricsConfig{
-		Endpoint:        "https://localhost:3131",
-		MetricsEndpoint: "https://localhost:3232",
+		CommonEndpoint:  "https://localhost:3131",
+		MetricsEndpoint: "https://localhost:3232/v1/metrics",
 	}
 
 	t.Run("testing with two endpoints", func(t *testing.T) {
-		testMetricsEndpLen(t, 1, &mcfg)
+		testMetricsHTTPOptions(t, otlpOptions{Endpoint: "localhost:3232", URLPath: "/v1/metrics"}, &mcfg)
 	})
 
 	mcfg = MetricsConfig{
-		Endpoint:        "https://localhost:3131",
-		MetricsEndpoint: "https://localhost:3232",
+		CommonEndpoint: "https://localhost:3131/otlp",
 	}
 
-	t.Run("testing with only metrics endpoint", func(t *testing.T) {
-		testMetricsEndpLen(t, 1, &mcfg)
+	t.Run("testing with only common endpoint", func(t *testing.T) {
+		testMetricsHTTPOptions(t, otlpOptions{Endpoint: "localhost:3131", URLPath: "/otlp/v1/metrics"}, &mcfg)
 	})
 
-	mcfg.Endpoint = "https://localhost:3131"
-	mcfg.MetricsEndpoint = ""
-
-	t.Run("testing with only non-signal endpoint", func(t *testing.T) {
-		testMetricsEndpLen(t, 1, &mcfg)
-	})
-
-	mcfg.Endpoint = "http://localhost:3131"
+	mcfg = MetricsConfig{
+		CommonEndpoint:  "https://localhost:3131",
+		MetricsEndpoint: "http://localhost:3232",
+	}
 	t.Run("testing with insecure endpoint", func(t *testing.T) {
-		testMetricsEndpLen(t, 2, &mcfg)
+		testMetricsHTTPOptions(t, otlpOptions{Endpoint: "localhost:3232", Insecure: true}, &mcfg)
 	})
 
-	mcfg.Endpoint = "http://localhost:3131/path_to_endpoint"
-	t.Run("testing with insecure endpoint and path", func(t *testing.T) {
-		testMetricsEndpLen(t, 3, &mcfg)
-	})
+	mcfg = MetricsConfig{
+		CommonEndpoint:     "https://localhost:3232",
+		InsecureSkipVerify: true,
+	}
 
-	mcfg.Endpoint = "http://localhost:3131/v1/metrics"
-	t.Run("testing with insecure endpoint and containing v1/metrics", func(t *testing.T) {
-		testMetricsEndpLen(t, 2, &mcfg)
+	t.Run("testing with skip TLS verification", func(t *testing.T) {
+		testMetricsHTTPOptions(t, otlpOptions{Endpoint: "localhost:3232", URLPath: "/v1/metrics", SkipTLSVerify: true}, &mcfg)
 	})
 }
 
-func testMetricsEndpLen(t *testing.T, expected int, mcfg *MetricsConfig) {
+func testMetricsHTTPOptions(t *testing.T, expected otlpOptions, mcfg *MetricsConfig) {
+	defer restoreEnvAfterExecution()()
 	opts, err := getHTTPMetricEndpointOptions(mcfg)
 	require.NoError(t, err)
-	// otlpmetrichttp.Options are notoriously hard to compare, so we just test the length
-	assert.Equal(t, expected, len(opts))
+	assert.Equal(t, expected, opts)
 }
 
 func TestMissingSchemeInMetricsEndpoint(t *testing.T) {
-	opts, err := getHTTPMetricEndpointOptions(&MetricsConfig{Endpoint: "http://foo:3030"})
+	defer restoreEnvAfterExecution()()
+	opts, err := getHTTPMetricEndpointOptions(&MetricsConfig{CommonEndpoint: "http://foo:3030"})
 	require.NoError(t, err)
 	require.NotEmpty(t, opts)
 
-	_, err = getHTTPMetricEndpointOptions(&MetricsConfig{Endpoint: "foo:3030"})
+	_, err = getHTTPMetricEndpointOptions(&MetricsConfig{CommonEndpoint: "foo:3030"})
 	require.Error(t, err)
 
-	_, err = getHTTPMetricEndpointOptions(&MetricsConfig{Endpoint: "foo"})
+	_, err = getHTTPMetricEndpointOptions(&MetricsConfig{CommonEndpoint: "foo"})
 	require.Error(t, err)
 }
 
 func TestMetrics_InternalInstrumentation(t *testing.T) {
+	defer restoreEnvAfterExecution()()
 	// fake OTEL collector server
 	coll := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusOK)
@@ -106,13 +103,13 @@ func TestMetrics_InternalInstrumentation(t *testing.T) {
 	})
 	internalMetrics := &fakeInternalMetrics{}
 	exporter, err := ReportMetrics(context.Background(),
-		&MetricsConfig{Endpoint: coll.URL, Interval: 10 * time.Millisecond, ReportersCacheLen: 16},
+		&MetricsConfig{CommonEndpoint: coll.URL, Interval: 10 * time.Millisecond, ReportersCacheLen: 16},
 		&global.ContextInfo{
 			ServiceName: "foo",
 			Metrics:     internalMetrics,
 		})
 	require.NoError(t, err)
-	inputNode.SendsTo(node.AsTerminal(exporter))
+	inputNode.SendTo(node.AsTerminal(exporter))
 
 	go inputNode.Start()
 
@@ -177,38 +174,91 @@ type fakeInternalMetrics struct {
 }
 
 func TestGRPCMetricsEndpointOptions(t *testing.T) {
+	defer restoreEnvAfterExecution()()
 	t.Run("do not accept URLs without a scheme", func(t *testing.T) {
-		_, err := getGRPCMetricEndpointOptions(&MetricsConfig{Endpoint: "foo:3939"})
+		_, err := getGRPCMetricEndpointOptions(&MetricsConfig{CommonEndpoint: "foo:3939"})
 		assert.Error(t, err)
 	})
-	t.Run("handles insecure skip verification", func(t *testing.T) {
-		opts, err := getGRPCMetricEndpointOptions(&MetricsConfig{
-			Endpoint:           "http://foo:3939",
-			InsecureSkipVerify: true,
-		})
-		assert.NoError(t, err)
-		assert.Len(t, opts, 3) // host, insecure, insecure skip
+
+	mcfg := MetricsConfig{
+		CommonEndpoint:  "https://localhost:3131",
+		MetricsEndpoint: "https://localhost:3232",
+	}
+
+	t.Run("testing with two endpoints", func(t *testing.T) {
+		testMetricsGRPCOptions(t, otlpOptions{Endpoint: "localhost:3232"}, &mcfg)
 	})
+
+	mcfg = MetricsConfig{
+		CommonEndpoint: "https://localhost:3131",
+	}
+
+	t.Run("testing with only common endpoint", func(t *testing.T) {
+		testMetricsGRPCOptions(t, otlpOptions{Endpoint: "localhost:3131"}, &mcfg)
+	})
+
+	mcfg = MetricsConfig{
+		CommonEndpoint:  "https://localhost:3131",
+		MetricsEndpoint: "http://localhost:3232",
+	}
+	t.Run("testing with insecure endpoint", func(t *testing.T) {
+		testMetricsGRPCOptions(t, otlpOptions{Endpoint: "localhost:3232", Insecure: true}, &mcfg)
+	})
+
+	mcfg = MetricsConfig{
+		CommonEndpoint:     "https://localhost:3232",
+		InsecureSkipVerify: true,
+	}
+
+	t.Run("testing with skip TLS verification", func(t *testing.T) {
+		testMetricsGRPCOptions(t, otlpOptions{Endpoint: "localhost:3232", SkipTLSVerify: true}, &mcfg)
+	})
+}
+
+func testMetricsGRPCOptions(t *testing.T, expected otlpOptions, mcfg *MetricsConfig) {
+	defer restoreEnvAfterExecution()()
+	opts, err := getGRPCMetricEndpointOptions(mcfg)
+	require.NoError(t, err)
+	assert.Equal(t, expected, opts)
 }
 
 func TestMetricsSetupHTTP_Protocol(t *testing.T) {
 	testCases := []struct {
+		Endpoint               string
 		ProtoVal               Protocol
 		MetricProtoVal         Protocol
 		ExpectedProtoEnv       string
 		ExpectedMetricProtoEnv string
 	}{
-		{ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: ""},
+		{ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "http/protobuf"},
 		{ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
 		{ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
 		{ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
+		{Endpoint: "http://foo:4317", ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "grpc"},
+		{Endpoint: "http://foo:4317", ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
+		{Endpoint: "http://foo:4317", ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
+		{Endpoint: "http://foo:4317", ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
+		{Endpoint: "http://foo:14317", ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "grpc"},
+		{Endpoint: "http://foo:14317", ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
+		{Endpoint: "http://foo:14317", ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
+		{Endpoint: "http://foo:14317", ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
+		{Endpoint: "http://foo:4318", ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "http/protobuf"},
+		{Endpoint: "http://foo:4318", ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
+		{Endpoint: "http://foo:4318", ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
+		{Endpoint: "http://foo:4318", ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
+		{Endpoint: "http://foo:24318", ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "http/protobuf"},
+		{Endpoint: "http://foo:24318", ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
+		{Endpoint: "http://foo:24318", ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
+		{Endpoint: "http://foo:24318", ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
 	}
 	for _, tc := range testCases {
-		t.Run(string(tc.ProtoVal)+"/"+string(tc.MetricProtoVal), func(t *testing.T) {
+		t.Run(tc.Endpoint+"/"+string(tc.ProtoVal)+"/"+string(tc.MetricProtoVal), func(t *testing.T) {
 			defer restoreEnvAfterExecution()()
 			_, err := getHTTPMetricEndpointOptions(&MetricsConfig{
-				Endpoint: "http://host:3333",
-				Protocol: tc.ProtoVal, MetricsProtocol: tc.MetricProtoVal,
+				CommonEndpoint:  "http://host:3333",
+				MetricsEndpoint: tc.Endpoint,
+				Protocol:        tc.ProtoVal,
+				MetricsProtocol: tc.MetricProtoVal,
 			})
 			require.NoError(t, err)
 			assert.Equal(t, tc.ExpectedProtoEnv, os.Getenv(envProtocol))
@@ -223,7 +273,7 @@ func TestMetricSetupHTTP_DoNotOverrideEnv(t *testing.T) {
 		require.NoError(t, os.Setenv(envProtocol, "foo-proto"))
 		require.NoError(t, os.Setenv(envMetricsProtocol, "bar-proto"))
 		_, err := getHTTPMetricEndpointOptions(&MetricsConfig{
-			Endpoint: "http://host:3333", Protocol: "foo", MetricsProtocol: "bar",
+			CommonEndpoint: "http://host:3333", Protocol: "foo", MetricsProtocol: "bar",
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "foo-proto", os.Getenv(envProtocol))
@@ -233,7 +283,7 @@ func TestMetricSetupHTTP_DoNotOverrideEnv(t *testing.T) {
 		defer restoreEnvAfterExecution()()
 		require.NoError(t, os.Setenv(envProtocol, "foo-proto"))
 		_, err := getHTTPMetricEndpointOptions(&MetricsConfig{
-			Endpoint: "http://host:3333", Protocol: "foo",
+			CommonEndpoint: "http://host:3333", Protocol: "foo",
 		})
 		require.NoError(t, err)
 		_, ok := os.LookupEnv(envMetricsProtocol)

@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
-	"github.com/mariomac/pipes/pkg/node"
-	"golang.org/x/exp/slog"
 
 	"github.com/grafana/beyla/pkg/internal/imetrics"
 	"github.com/grafana/beyla/pkg/internal/request"
@@ -39,24 +38,22 @@ type ringBufForwarder[T any] struct {
 	spansLen   int
 	access     sync.Mutex
 	ticker     *time.Ticker
-	reader     func(*ringbuf.Record) (request.Span, error)
+	reader     func(*ringbuf.Record) (request.Span, bool, error)
 	metrics    imetrics.Reporter
 }
 
 // ForwardRingbuf returns a function reads HTTPRequestTraces from an input ring buffer, accumulates them into an
 // internal buffer, and forwards them to an output events channel, previously converted to request.Span
 // instances.
-// Despite it returns a StartFuncCtx, this is not used inside the Pipes' library but it's invoked
-// directly in the code as a simple function.
 func ForwardRingbuf[T any](
 	svcName string,
 	cfg *TracerConfig,
 	logger *slog.Logger,
 	ringbuffer *ebpf.Map,
-	reader func(*ringbuf.Record) (request.Span, error),
+	reader func(*ringbuf.Record) (request.Span, bool, error),
 	metrics imetrics.Reporter,
 	closers ...io.Closer,
-) node.StartFuncCtx[[]request.Span] {
+) func(context.Context, chan<- []request.Span) {
 	rbf := ringBufForwarder[T]{
 		svcName: svcName, cfg: cfg, logger: logger, ringbuffer: ringbuffer,
 		closers: closers, reader: reader, metrics: metrics,
@@ -108,12 +105,17 @@ func (rbf *ringBufForwarder[T]) readAndForward(ctx context.Context, spansChan ch
 			continue
 		}
 		rbf.access.Lock()
-		rbf.spans[rbf.spansLen], err = rbf.reader(&record)
+		s, ignore, err := rbf.reader(&record)
 		if err != nil {
 			rbf.logger.Error("error parsing perf event", err)
 			rbf.access.Unlock()
 			continue
 		}
+		if ignore {
+			rbf.access.Unlock()
+			continue
+		}
+		rbf.spans[rbf.spansLen] = s
 		// we need to decorate each span with the tracer's service name
 		// if this information is not forwarded from eBPF
 		if rbf.svcName != "" {

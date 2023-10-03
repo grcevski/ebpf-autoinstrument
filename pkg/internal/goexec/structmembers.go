@@ -6,9 +6,8 @@ import (
 	"debug/elf"
 	_ "embed"
 	"fmt"
+	"log/slog"
 	"strings"
-
-	"golang.org/x/exp/slog"
 
 	"github.com/grafana/go-offsets-tracker/pkg/offsets"
 )
@@ -67,6 +66,7 @@ var structMembers = map[string]structInfo{
 		fields: map[string]string{
 			"st":     "grpc_stream_st_ptr_pos",
 			"method": "grpc_stream_method_ptr_pos",
+			"ctx":    "grpc_stream_ctx_ptr_pos",
 		},
 	},
 	"google.golang.org/grpc/internal/status.Status": {
@@ -106,6 +106,12 @@ var structMembers = map[string]structInfo{
 		fields: map[string]string{
 			"buf": "io_writer_buf_ptr_pos",
 			"n":   "io_writer_n_pos",
+		},
+	},
+	"context.valueCtx": {
+		lib: "go",
+		fields: map[string]string{
+			"val": "value_context_val_ptr_pos",
 		},
 	},
 }
@@ -149,8 +155,10 @@ func structMemberPreFetchedOffsets(elfFile *elf.File, fieldOffsets FieldOffsets)
 	for strName, strInfo := range structMembers {
 		version, ok := libVersions[strInfo.lib]
 		if !ok {
-			log.Debug("can't find version for library", "lib", strInfo.lib)
-			continue
+			log.Debug("can't find version for library. Assuming 0.0.0", "lib", strInfo.lib)
+			// unversioned libraries are accounted as "0.0.0" in offsets.json file
+			// https://github.com/grafana/go-offsets-tracker/blob/main/pkg/writer/writer.go#L108-L110
+			version = "0.0.0"
 		}
 
 		dash := strings.Index(version, "-")
@@ -166,6 +174,7 @@ func structMemberPreFetchedOffsets(elfFile *elf.File, fieldOffsets FieldOffsets)
 					"lib", strInfo.lib, "name", strName, "field", fieldName, "version", version)
 				continue
 			}
+			log.Debug("found offset", "constantName", constantName, "offset", offset)
 			fieldOffsets[constantName] = offset
 		}
 	}
@@ -199,17 +208,20 @@ func structMemberOffsetsFromDwarf(data *dwarf.Data) (FieldOffsets, map[string]st
 			continue
 		}
 		attrs := getAttrs(entry)
-		typeName := attrs[dwarf.AttrName].(string)
-		if structMember, ok := structMembers[typeName]; !ok {
+		typeName, ok := attrs[dwarf.AttrName]
+		if !ok {
 			reader.SkipChildren()
 			continue
-		} else { //nolint:revive
-			//fmt.Printf("attrs %v\n\n---\n\n", attrs)
-			log.Debug("inspecting fields for struct type", "type", typeName)
-			if err := readMembers(reader, structMember.fields, expectedReturns, fieldOffsets); err != nil {
-				log.Debug("error reading DRWARF info", "type", typeName, "members", err)
-				return nil, expectedReturns
-			}
+		}
+		structMember, ok := structMembers[typeName.(string)]
+		if !ok {
+			reader.SkipChildren()
+			continue
+		}
+		log.Debug("inspecting fields for struct type", "type", typeName)
+		if err := readMembers(reader, structMember.fields, expectedReturns, fieldOffsets); err != nil {
+			log.Debug("error reading DRWARF info", "type", typeName, "members", err)
+			return nil, expectedReturns
 		}
 	}
 }

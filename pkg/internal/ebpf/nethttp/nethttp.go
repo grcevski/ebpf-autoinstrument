@@ -17,10 +17,10 @@ package nethttp
 import (
 	"context"
 	"io"
+	"log/slog"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
-	"golang.org/x/exp/slog"
 
 	ebpfcommon "github.com/grafana/beyla/pkg/internal/ebpf/common"
 	"github.com/grafana/beyla/pkg/internal/exec"
@@ -91,9 +91,9 @@ func (p *Tracer) GoProbes() map[string]ebpfcommon.FunctionPrograms {
 		"net/http.(*response).WriteHeader": {
 			Start: p.bpfObjects.UprobeWriteHeader,
 		},
-		"net/http.(*Transport).RoundTrip": {
-			Start: p.bpfObjects.UprobeTransportRoundTrip,
-			End:   p.bpfObjects.UprobeTransportRoundTripReturn,
+		"net/http.(*Transport).roundTrip": { // HTTP client, works with Client.Do as well as using the RoundTripper directly
+			Start: p.bpfObjects.UprobeRoundTrip,
+			End:   p.bpfObjects.UprobeRoundTripReturn,
 		},
 		"net/http.Header.writeSubset": {
 			Start: p.bpfObjects.UprobeWriteSubset,

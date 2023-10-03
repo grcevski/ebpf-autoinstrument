@@ -1,10 +1,13 @@
-# Beyla
+<img src="docs/sources/assets/logo.png" height=226 alt="Grafana Beyla logo">
+
+# Grafana Beyla
+
+eBPF-based auto-instrumentation of HTTP/HTTPS/GRPC Go services, as well as HTTP/HTTPS services
+written in other languages (intercepting Kernel-level socket operations as well as
+OpenSSL invocations).
 
 [![Build Status](https://drone.grafana.net/api/badges/grafana/beyla/status.svg?ref=refs/heads/main)](https://drone.grafana.net/grafana/beyla)
 
-eBPF-based autoinstrumentation of HTTP/HTTPS/GRPC Go services, as well as HTTP/HTTPS services
-written in other languages (intercepting Kernel-level socket operations as well as
-OpenSSL invocations).
 
 ## Getting Started
 
@@ -26,7 +29,7 @@ watch curl -s http://localhost:8080
 
 Now that we have an example running, we are ready to download and run Beyla.
 
-First, download and unpack the latest release from the [Github releases page](https://github.com/grafana/beyla/releases).
+First, download and unpack the latest release from the [GitHub releases page](https://github.com/grafana/beyla/releases).
 The release should contain the `./beyla` executable.
 
 Beyla supports multiple ways to find the service to be instrumented (by network port, executable name, process ID),
@@ -42,7 +45,7 @@ sudo -E ./beyla
 
 Now, you should see metrics on [http://localhost:9400/metrics](http://localhost:9400/metrics).
 
-See [Documentation](https://grafana.com/docs/TODO) and the [quickstart tutorial](docs/sources/tutorial/index.md) for more info.
+See [Documentation](https://grafana.com/docs/grafana-cloud/monitor-applications/beyla/) and the [quickstart tutorial](docs/sources/tutorial/index.md) for more info.
 
 ## Requirements
 
@@ -75,7 +78,7 @@ You can just trigger the Kubernetes descriptors in the `deployments/` folder.
    $ vim 01-grafana-credentials.yml
    $ kubectl apply -f 01-grafana-credentials.yml 
    ```
-2. Deploy the Grafana Aent:
+2. Deploy the Grafana Agent:
    ```
    kubectl apply -f deployments/02-grafana-agent.yml
    ```

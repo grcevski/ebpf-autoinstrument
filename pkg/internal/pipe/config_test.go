@@ -19,9 +19,9 @@ import (
 
 func TestConfig_Overrides(t *testing.T) {
 	userConfig := bytes.NewBufferString(`
+executable_name: tras
 channel_buffer_len: 33
 ebpf:
-  executable_name: tras
   functions:
     - FooBar
 otel_metrics_export:
@@ -49,21 +49,22 @@ kubernetes:
 	assert.NoError(t, cfg.Validate())
 
 	assert.Equal(t, &Config{
+		Exec:             "tras",
 		ServiceName:      "svc-name",
 		ChannelBufferLen: 33,
 		LogLevel:         "INFO",
 		Printer:          false,
 		Noop:             true,
 		EBPF: ebpfcommon.TracerConfig{
-			Exec:         "tras",
 			BatchLength:  100,
 			BatchTimeout: time.Second,
 			BpfBaseDir:   "/var/run/beyla",
 		},
 		Metrics: otel.MetricsConfig{
 			Interval:          5 * time.Second,
-			Endpoint:          "localhost:3131",
-			Protocol:          otel.ProtocolHTTPProtobuf,
+			CommonEndpoint:    "localhost:3131",
+			MetricsEndpoint:   "localhost:3030",
+			Protocol:          otel.ProtocolUnset,
 			ReportersCacheLen: 16,
 			Buckets: otel.Buckets{
 				DurationHistogram:    []float64{0, 1, 2},
@@ -71,8 +72,8 @@ kubernetes:
 			},
 		},
 		Traces: otel.TracesConfig{
-			Protocol:           otel.ProtocolHTTPProtobuf,
-			Endpoint:           "localhost:3131",
+			Protocol:           otel.ProtocolUnset,
+			CommonEndpoint:     "localhost:3131",
 			TracesEndpoint:     "localhost:3232",
 			MaxQueueSize:       4096,
 			MaxExportBatchSize: 4096,
@@ -95,6 +96,7 @@ kubernetes:
 			Enable:               transform.EnabledTrue,
 			InformersSyncTimeout: 30 * time.Second,
 		},
+		Routes: &transform.RoutesConfig{},
 	}, cfg)
 }
 

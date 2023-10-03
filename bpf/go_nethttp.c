@@ -105,8 +105,16 @@ int uprobe_WriteHeader(struct pt_regs *ctx) {
         bpf_map_lookup_elem(&ongoing_server_requests, &goroutine_addr);
     bpf_map_delete_elem(&ongoing_server_requests, &goroutine_addr);
     if (invocation == NULL) {
-        bpf_dbg_printk("can't read http invocation metadata");
-        return 0;
+        void *parent_go = (void *)find_parent_goroutine(goroutine_addr);
+        if (parent_go) {
+            bpf_dbg_printk("found parent goroutine for header [%llx]", parent_go);
+            invocation = bpf_map_lookup_elem(&ongoing_server_requests, &parent_go);
+            bpf_map_delete_elem(&ongoing_server_requests, &parent_go);
+        }
+        if (!invocation) {
+            bpf_dbg_printk("can't read http invocation metadata");
+            return 0;
+        }
     }
 
     http_request_trace *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace), 0);
@@ -170,6 +178,7 @@ int uprobe_WriteHeader(struct pt_regs *ctx) {
         bpf_ringbuf_discard(trace, 0);
         return 0;
     }
+
     bpf_probe_read(&trace->content_length, sizeof(trace->content_length), (void *)(req_ptr + content_length_ptr_pos));
 
     // Get traceparent from the Request.Header
@@ -193,9 +202,9 @@ int uprobe_WriteHeader(struct pt_regs *ctx) {
 
 /* HTTP Client. We expect to see HTTP client in both HTTP server and gRPC server calls.*/
 
-SEC("uprobe/transportRoundTrip")
-int uprobe_transportRoundTrip(struct pt_regs *ctx) {
-    bpf_dbg_printk("=== uprobe/proc http transport.RoundTrip === ");
+SEC("uprobe/roundTrip")
+int uprobe_roundTrip(struct pt_regs *ctx) {
+    bpf_dbg_printk("=== uprobe/proc http roundTrip === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     void *req_ptr = GO_PARAM2(ctx);
@@ -222,9 +231,9 @@ int uprobe_transportRoundTrip(struct pt_regs *ctx) {
     return 0;
 }
 
-SEC("uprobe/transportRoundTrip_return")
-int uprobe_transportRoundTripReturn(struct pt_regs *ctx) {
-    bpf_dbg_printk("=== uprobe/proc http transport.RoundTrip return === ");
+SEC("uprobe/roundTrip_return")
+int uprobe_roundTripReturn(struct pt_regs *ctx) {
+    bpf_dbg_printk("=== uprobe/proc http roundTrip return === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     bpf_dbg_printk("goroutine_addr %lx", goroutine_addr);

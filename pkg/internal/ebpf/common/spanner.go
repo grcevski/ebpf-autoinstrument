@@ -2,10 +2,9 @@ package ebpfcommon
 
 import (
 	"bytes"
+	"log/slog"
 	"net"
 	"strconv"
-
-	"golang.org/x/exp/slog"
 
 	"github.com/grafana/beyla/pkg/internal/request"
 )
@@ -26,13 +25,12 @@ func HTTPRequestTraceToSpan(trace *HTTPRequestTrace) request.Span {
 	peer := ""
 	hostname := ""
 	hostPort := 0
-	traceparent := ""
+	traceparent := extractTraceparent(trace.Traceparent)
 
 	switch request.EventType(trace.Type) {
 	case request.EventTypeHTTPClient, request.EventTypeHTTP:
 		peer, _ = extractHostPort(trace.RemoteAddr[:])
 		hostname, hostPort = extractHostPort(trace.Host[:])
-		traceparent = extractTraceparent(trace.Traceparent)
 	case request.EventTypeGRPC:
 		hostPort = int(trace.HostPort)
 		peer = extractIP(trace.RemoteAddr[:], int(trace.RemoteAddrLen))
@@ -40,7 +38,7 @@ func HTTPRequestTraceToSpan(trace *HTTPRequestTrace) request.Span {
 	case request.EventTypeGRPCClient:
 		hostname, hostPort = extractHostPort(trace.Host[:])
 	default:
-		log.Warn("unknown trace type %d", trace.Type)
+		log.Warn("unknown trace type", "type", trace.Type)
 	}
 
 	return request.Span{

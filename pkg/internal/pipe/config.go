@@ -25,13 +25,15 @@ var defaultConfig = Config{
 		BpfBaseDir:   "/var/run/beyla",
 	},
 	Metrics: otel.MetricsConfig{
-		Protocol:          otel.ProtocolHTTPProtobuf,
+		Protocol:          otel.ProtocolUnset,
+		MetricsProtocol:   otel.ProtocolUnset,
 		Interval:          5 * time.Second,
 		Buckets:           otel.DefaultBuckets,
 		ReportersCacheLen: 16,
 	},
 	Traces: otel.TracesConfig{
-		Protocol:           otel.ProtocolHTTPProtobuf,
+		Protocol:           otel.ProtocolUnset,
+		TracesProtocol:     otel.ProtocolUnset,
 		MaxQueueSize:       4096,
 		MaxExportBatchSize: 4096,
 		SamplingRatio:      1.0,
@@ -53,6 +55,7 @@ var defaultConfig = Config{
 		Enable:               transform.EnabledDefault,
 		InformersSyncTimeout: 30 * time.Second,
 	},
+	Routes: &transform.RoutesConfig{},
 }
 
 type Config struct {
@@ -65,6 +68,20 @@ type Config struct {
 	Traces     otel.TracesConfig             `yaml:"otel_traces_export"`
 	Prometheus prom.PrometheusConfig         `yaml:"prometheus_export"`
 	Printer    debug.PrintEnabled            `yaml:"print_traces" env:"PRINT_TRACES"`
+
+	// Exec allows selecting the instrumented executable whose complete path contains the Exec value.
+	Exec string `yaml:"executable_name" env:"EXECUTABLE_NAME"`
+	// Port allows selecting the instrumented executable that owns the Port value. If this value is set (and
+	// different to zero), the value of the Exec property won't take effect.
+	// It's important to emphasize that if your process opens multiple HTTP/GRPC ports, the auto-instrumenter
+	// will instrument all the service calls in all the ports, not only the port specified here.
+	Port int `yaml:"open_port" env:"OPEN_PORT"`
+	// SystemWide allows instrumentation of all HTTP (no gRPC) calls, incoming and outgoing at a system wide scale.
+	// No filtering per application will be done. Using this option may result in reduced quality of information
+	// gathered for certain languages, such as Golang.
+	SystemWide bool `yaml:"system_wide" env:"SYSTEM_WIDE"`
+	// This can be enabled to use generic HTTP tracers only, no Go-specifics will be used:
+	SkipGoSpecificTracers bool `yaml:"skip_go_specific_tracers" env:"SKIP_GO_SPECIFIC_TRACERS"`
 
 	LogLevel string `yaml:"log_level" env:"LOG_LEVEL"`
 
@@ -89,10 +106,10 @@ func (e ConfigError) Error() string {
 }
 
 func (c *Config) validateInstrumentation() error {
-	if c.EBPF.Port == 0 && c.EBPF.Exec == "" && !c.EBPF.SystemWide {
+	if c.Port == 0 && c.Exec == "" && !c.SystemWide {
 		return ConfigError("missing EXECUTABLE_NAME, OPEN_PORT or SYSTEM_WIDE property")
 	}
-	if (c.EBPF.Port != 0 || c.EBPF.Exec != "") && c.EBPF.SystemWide {
+	if (c.Port != 0 || c.Exec != "") && c.SystemWide {
 		return ConfigError("use either SYSTEM_WIDE or any of EXECUTABLE_NAME and OPEN_PORT, not both")
 	}
 	if c.EBPF.BatchLength == 0 {

@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -25,9 +26,9 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/exp/slog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/grafana/beyla/test/cmd/grpc/routeguide"
@@ -50,7 +51,15 @@ type routeGuideServer struct {
 }
 
 // GetFeature returns the feature at the given point.
-func (s *routeGuideServer) GetFeature(_ context.Context, point *pb.Point) (*pb.Feature, error) {
+func (s *routeGuideServer) GetFeature(ctx context.Context, point *pb.Point) (*pb.Feature, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("failed to get metadata")
+	}
+	tp := md["traceparent"]
+	if len(tp) != 0 {
+		slog.Info("GetFeature", "traceparent", tp[0])
+	}
 	slog.Debug("GetFeature", "lat", point.Latitude, "long", point.Longitude)
 	for _, feature := range s.savedFeatures {
 		if proto.Equal(feature.Location, point) {
@@ -249,10 +258,9 @@ func main() {
 		}
 	}
 
-	ho := slog.HandlerOptions{
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: lvl,
-	}
-	slog.SetDefault(slog.New(ho.NewTextHandler(os.Stderr)))
+	})))
 
 	flag.Parse()
 	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port))

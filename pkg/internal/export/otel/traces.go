@@ -2,9 +2,9 @@ package otel
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"strings"
@@ -13,14 +13,13 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/mariomac/pipes/pkg/node"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	trace2 "go.opentelemetry.io/otel/trace"
-	"golang.org/x/exp/slog"
-	"google.golang.org/grpc/credentials"
 
 	"github.com/grafana/beyla/pkg/internal/imetrics"
 	"github.com/grafana/beyla/pkg/internal/pipe/global"
@@ -43,8 +42,8 @@ var clientSpans, _ = lru.New[uint64, []request.Span](8192)
 const reporterName = "github.com/grafana/beyla"
 
 type TracesConfig struct {
-	Endpoint       string `yaml:"endpoint" env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
-	TracesEndpoint string `yaml:"-" env:"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"`
+	CommonEndpoint string `yaml:"-" env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
+	TracesEndpoint string `yaml:"endpoint" env:"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"`
 
 	Protocol       Protocol `yaml:"protocol" env:"OTEL_EXPORTER_OTLP_PROTOCOL"`
 	TracesProtocol Protocol `yaml:"-" env:"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"`
@@ -68,14 +67,33 @@ type TracesConfig struct {
 // either the OTEL endpoint and OTEL traces endpoint is defined.
 // If not enabled, this node won't be instantiated
 func (m TracesConfig) Enabled() bool { //nolint:gocritic
-	return m.Endpoint != "" || m.TracesEndpoint != ""
+	return m.CommonEndpoint != "" || m.TracesEndpoint != ""
 }
 
 func (m *TracesConfig) GetProtocol() Protocol {
 	if m.TracesProtocol != "" {
 		return m.TracesProtocol
 	}
-	return m.Protocol
+	if m.Protocol != "" {
+		return m.Protocol
+	}
+	return m.GuessProtocol()
+}
+
+func (m *TracesConfig) GuessProtocol() Protocol {
+	// If no explicit protocol is set, we guess it it from the metrics enpdoint port
+	// (assuming it uses a standard port or a development-like form like 14317, 24317, 14318...)
+	ep, _, err := parseTracesEndpoint(m)
+	if err == nil {
+		if strings.HasSuffix(ep.Port(), UsualPortGRPC) {
+			return ProtocolGRPC
+		} else if strings.HasSuffix(ep.Port(), UsualPortHTTP) {
+			return ProtocolHTTPProtobuf
+		}
+	}
+	// Otherwise we return default protocol according to the latest specification:
+	// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/exporter.md?plain=1#L53
+	return ProtocolHTTPProtobuf
 }
 
 // TracesReporter implement the graph node that receives request.Span
@@ -164,7 +182,7 @@ func httpTracer(ctx context.Context, cfg *TracesConfig) (*otlptrace.Exporter, er
 	if err != nil {
 		return nil, err
 	}
-	texp, err := otlptracehttp.New(ctx, topts...)
+	texp, err := otlptracehttp.New(ctx, topts.AsTraceHTTP()...)
 	if err != nil {
 		return nil, fmt.Errorf("creating HTTP trace exporter: %w", err)
 	}
@@ -176,7 +194,7 @@ func grpcTracer(ctx context.Context, cfg *TracesConfig) (*otlptrace.Exporter, er
 	if err != nil {
 		return nil, err
 	}
-	texp, err := otlptracegrpc.New(ctx, topts...)
+	texp, err := otlptracegrpc.New(ctx, topts.AsTraceGRPC()...)
 	if err != nil {
 		return nil, fmt.Errorf("creating GRPC trace exporter: %w", err)
 	}
@@ -211,6 +229,54 @@ func (r *TracesReporter) close() {
 	if err := r.traceExporter.Shutdown(r.ctx); err != nil {
 		log.Error("closing traces exporter", err)
 	}
+}
+
+// https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/http/#status
+func httpSpanStatusCode(span *request.Span) codes.Code {
+	if span.Status < 400 {
+		return codes.Unset
+	}
+
+	if span.Status < 500 {
+		if span.Type == request.EventTypeHTTPClient {
+			return codes.Error
+		}
+		return codes.Unset
+	}
+
+	return codes.Error
+}
+
+// https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/rpc/#grpc-status
+func grpcSpanStatusCode(span *request.Span) codes.Code {
+	if span.Type == request.EventTypeGRPCClient {
+		if span.Status == int(semconv.RPCGRPCStatusCodeOk.Value.AsInt64()) {
+			return codes.Unset
+		}
+		return codes.Error
+	}
+
+	switch int64(span.Status) {
+	case semconv.RPCGRPCStatusCodeUnknown.Value.AsInt64(),
+		semconv.RPCGRPCStatusCodeDeadlineExceeded.Value.AsInt64(),
+		semconv.RPCGRPCStatusCodeUnimplemented.Value.AsInt64(),
+		semconv.RPCGRPCStatusCodeInternal.Value.AsInt64(),
+		semconv.RPCGRPCStatusCodeUnavailable.Value.AsInt64(),
+		semconv.RPCGRPCStatusCodeDataLoss.Value.AsInt64():
+		return codes.Error
+	}
+
+	return codes.Unset
+}
+
+func spanStatusCode(span *request.Span) codes.Code {
+	switch span.Type {
+	case request.EventTypeHTTP, request.EventTypeHTTPClient:
+		return httpSpanStatusCode(span)
+	case request.EventTypeGRPC, request.EventTypeGRPCClient:
+		return grpcSpanStatusCode(span)
+	}
+	return codes.Unset
 }
 
 func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValue {
@@ -263,8 +329,8 @@ func (r *TracesReporter) traceAttributes(span *request.Span) []attribute.KeyValu
 	}
 
 	// append extra metadata
-	for _, meta := range span.Metadata {
-		attrs = append(attrs, attribute.String(meta.Key, meta.Val))
+	for key, val := range span.Metadata {
+		attrs = append(attrs, attribute.String(key, val))
 	}
 
 	return attrs
@@ -349,6 +415,8 @@ func (r *TracesReporter) makeSpan(parentCtx context.Context, tracer trace2.Trace
 		trace2.WithSpanKind(spanKind(span)),
 		trace2.WithAttributes(r.traceAttributes(span)...),
 	)
+
+	sp.SetStatus(spanStatusCode(span), "")
 
 	if span.RequestStart != span.Start {
 		var spP trace2.Span
@@ -472,75 +540,80 @@ func (r *TracesReporter) newTracers(svcName string) (*Tracers, error) {
 	return &tracers, nil
 }
 
-func parseTracesEndpoint(cfg *TracesConfig) (*url.URL, error) {
+func parseTracesEndpoint(cfg *TracesConfig) (*url.URL, bool, error) {
+	isCommon := false
 	endpoint := cfg.TracesEndpoint
 	if endpoint == "" {
-		endpoint = cfg.Endpoint
+		isCommon = true
+		endpoint = cfg.CommonEndpoint
 	}
 
 	murl, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("parsing endpoint URL %s: %w", endpoint, err)
+		return nil, isCommon, fmt.Errorf("parsing endpoint URL %s: %w", endpoint, err)
 	}
 	if murl.Scheme == "" || murl.Host == "" {
-		return nil, fmt.Errorf("URL %q must have a scheme and a host", endpoint)
+		return nil, isCommon, fmt.Errorf("URL %q must have a scheme and a host", endpoint)
 	}
-	return murl, nil
+	return murl, isCommon, nil
 }
 
-func getHTTPTracesEndpointOptions(cfg *TracesConfig) ([]otlptracehttp.Option, error) {
+func getHTTPTracesEndpointOptions(cfg *TracesConfig) (otlpOptions, error) {
+	opts := otlpOptions{}
 	log := tlog().With("transport", "http")
 
-	murl, err := parseTracesEndpoint(cfg)
+	murl, isCommon, err := parseTracesEndpoint(cfg)
 	if err != nil {
-		return nil, err
+		return opts, err
 	}
 
 	log.Debug("Configuring exporter", "protocol",
 		cfg.Protocol, "tracesProtocol", cfg.TracesProtocol, "endpoint", murl.Host)
 	setTracesProtocol(cfg)
-	opts := []otlptracehttp.Option{
-		otlptracehttp.WithEndpoint(murl.Host),
-	}
+	opts.Endpoint = murl.Host
 	if murl.Scheme == "http" || murl.Scheme == "unix" {
 		log.Debug("Specifying insecure connection", "scheme", murl.Scheme)
-		opts = append(opts, otlptracehttp.WithInsecure())
+		opts.Insecure = true
 	}
-
-	if len(murl.Path) > 0 && murl.Path != "/" && !strings.HasSuffix(murl.Path, "/v1/traces") {
-		urlPath := murl.Path + "/v1/traces"
-		log.Debug("Specifying path", "path", urlPath)
-		opts = append(opts, otlptracehttp.WithURLPath(urlPath))
+	// If the value is set from the OTEL_EXPORTER_OTLP_ENDPOINT common property, we need to add /v1/metrics to the path
+	// otherwise, we leave the path that is explicitly set by the user
+	opts.URLPath = murl.Path
+	if isCommon {
+		if strings.HasSuffix(opts.URLPath, "/") {
+			opts.URLPath += "v1/traces"
+		} else {
+			opts.URLPath += "/v1/traces"
+		}
+		log.Debug("Specifying path", "path", opts.URLPath)
 	}
 
 	if cfg.InsecureSkipVerify {
 		log.Debug("Setting InsecureSkipVerify")
-		opts = append(opts, otlptracehttp.WithTLSClientConfig(&tls.Config{InsecureSkipVerify: true}))
+		opts.SkipTLSVerify = true
 	}
 
 	return opts, nil
 }
 
-func getGRPCTracesEndpointOptions(cfg *TracesConfig) ([]otlptracegrpc.Option, error) {
+func getGRPCTracesEndpointOptions(cfg *TracesConfig) (otlpOptions, error) {
+	opts := otlpOptions{}
 	log := tlog().With("transport", "grpc")
-	murl, err := parseTracesEndpoint(cfg)
+	murl, _, err := parseTracesEndpoint(cfg)
 	if err != nil {
-		return nil, err
+		return opts, err
 	}
 
 	log.Debug("Configuring exporter", "protocol",
 		cfg.Protocol, "tracesProtocol", cfg.TracesProtocol, "endpoint", murl.Host)
-	opts := []otlptracegrpc.Option{
-		otlptracegrpc.WithEndpoint(murl.Host),
-	}
+	opts.Endpoint = murl.Host
 	if murl.Scheme == "http" || murl.Scheme == "unix" {
 		log.Debug("Specifying insecure connection", "scheme", murl.Scheme)
-		opts = append(opts, otlptracegrpc.WithInsecure())
+		opts.Insecure = true
 	}
 
 	if cfg.InsecureSkipVerify {
 		log.Debug("Setting InsecureSkipVerify")
-		opts = append(opts, otlptracegrpc.WithTLSCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})))
+		opts.SkipTLSVerify = true
 	}
 
 	return opts, nil
@@ -564,5 +637,8 @@ func setTracesProtocol(cfg *TracesConfig) {
 	}
 	if cfg.Protocol != "" {
 		os.Setenv(envProtocol, string(cfg.Protocol))
+		return
 	}
+	// unset. Guessing it
+	os.Setenv(envTracesProtocol, string(cfg.GuessProtocol()))
 }
