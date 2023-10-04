@@ -34,6 +34,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 typedef struct func_invocation_t {
     u64 start_monotime_ns;
     struct pt_regs regs; // we store registers on invocation to be able to fetch the arguments at return
+    struct span_context sc;
 } func_invocation;
 
 struct {

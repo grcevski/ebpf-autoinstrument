@@ -38,6 +38,10 @@ type bpf_debugFuncInvocation struct {
 		Rsp     uint64
 		Ss      uint64
 	}
+	Sc struct {
+		TraceID [16]uint8
+		SpanID  [8]uint8
+	}
 }
 
 type bpf_debugGoroutineMetadata struct {
@@ -45,10 +49,7 @@ type bpf_debugGoroutineMetadata struct {
 	Timestamp uint64
 }
 
-type bpf_debugTraceparentInfo struct {
-	Traceparent [55]uint8
-	Flags       uint8
-}
+type bpf_debugTraceparentInfo struct{ Traceparent [55]uint8 }
 
 // loadBpf_debug returns the embedded CollectionSpec for bpf_debug.
 func loadBpf_debug() (*ebpf.CollectionSpec, error) {
@@ -110,6 +111,7 @@ type bpf_debugMapSpecs struct {
 	OngoingGoroutines         *ebpf.MapSpec `ebpf:"ongoing_goroutines"`
 	OngoingHttpClientRequests *ebpf.MapSpec `ebpf:"ongoing_http_client_requests"`
 	OngoingServerRequests     *ebpf.MapSpec `ebpf:"ongoing_server_requests"`
+	TempCharBuf               *ebpf.MapSpec `ebpf:"temp_char_buf"`
 	TpInfos                   *ebpf.MapSpec `ebpf:"tp_infos"`
 }
 
@@ -139,6 +141,7 @@ type bpf_debugMaps struct {
 	OngoingGoroutines         *ebpf.Map `ebpf:"ongoing_goroutines"`
 	OngoingHttpClientRequests *ebpf.Map `ebpf:"ongoing_http_client_requests"`
 	OngoingServerRequests     *ebpf.Map `ebpf:"ongoing_server_requests"`
+	TempCharBuf               *ebpf.Map `ebpf:"temp_char_buf"`
 	TpInfos                   *ebpf.Map `ebpf:"tp_infos"`
 }
 
@@ -151,6 +154,7 @@ func (m *bpf_debugMaps) Close() error {
 		m.OngoingGoroutines,
 		m.OngoingHttpClientRequests,
 		m.OngoingServerRequests,
+		m.TempCharBuf,
 		m.TpInfos,
 	)
 }

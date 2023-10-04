@@ -23,7 +23,6 @@
 
 typedef struct traceparent_info_t {
     u8 traceparent[TRACEPARENT_LEN];
-    u8 flags;
 } traceparent_info;
 
 struct {
@@ -47,6 +46,13 @@ struct {
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
 } tp_infos SEC(".maps");
 
+struct bpf_map_def SEC("maps") temp_char_buf = {
+    .type = BPF_MAP_TYPE_PERCPU_ARRAY,
+    .key_size = sizeof(int),
+    .value_size = sizeof(char[256]),
+    .max_entries = 256,
+};
+
 /* HTTP Server */
 
 // This instrumentation attaches uprobe to the following function:
@@ -56,13 +62,44 @@ SEC("uprobe/ServeHTTP")
 int uprobe_ServeHTTP(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/ServeHTTP === ");
     void *goroutine_addr = GOROUTINE_PTR(ctx);
-    bpf_dbg_printk("goroutine_addr %lx", goroutine_addr);
+    void *resp_ptr = GO_PARAM3(ctx);
+
+    bpf_dbg_printk("goroutine_addr %lx, response %llx, resp ptr %llx", goroutine_addr, resp_ptr);
 
     func_invocation invocation = {
         .start_monotime_ns = bpf_ktime_get_ns(),
         .regs = *ctx,
     };
 
+    void *req_ptr = 0;
+    bpf_probe_read(&req_ptr, sizeof(req_ptr), (void *)(resp_ptr + resp_req_pos));
+
+    if (req_ptr) {
+        void *traceparent_ptr = extract_traceparent_from_req_headers((void*)(req_ptr + req_header_ptr_pos));
+        if (traceparent_ptr) {
+            int cpu = bpf_get_smp_processor_id();
+            char *buf = bpf_map_lookup_elem(&temp_char_buf, &cpu);
+            if (buf) {
+                bpf_probe_read(buf, W3C_VAL_LENGTH, traceparent_ptr);
+                w3c_string_to_span_context(buf, &invocation.sc);
+                generate_random_bytes(invocation.sc.SpanID, SPAN_ID_SIZE);
+            } else {
+                bpf_printk("Error reading temp per CPU storage");
+            }        
+        } else {
+            invocation.sc = generate_span_context();
+        }
+    } else {
+        invocation.sc = generate_span_context();
+    }
+
+    int cpu = bpf_get_smp_processor_id();
+    unsigned char *buf = bpf_map_lookup_elem(&temp_char_buf, &cpu);
+
+    if (buf) {
+        span_context_to_w3c_string(&invocation.sc, buf);
+        bpf_dbg_printk("sc %s", buf);
+    }
     // Write event
     if (bpf_map_update_elem(&ongoing_server_requests, &goroutine_addr, &invocation, BPF_ANY)) {
         bpf_dbg_printk("can't update map element");
@@ -79,7 +116,7 @@ int uprobe_startBackgroundRead(struct pt_regs *ctx) {
     bpf_dbg_printk("goroutine_addr %lx", goroutine_addr);
 
     // This code is here for keepalive support on HTTP requests. Since the connection is not
-    // established everytime, we set the initial goroutine start on the new read initiation.
+    // established every time, we set the initial goroutine start on the new read initiation.
     goroutine_metadata *g_metadata = bpf_map_lookup_elem(&ongoing_goroutines, &goroutine_addr);
     if (!g_metadata) {
         goroutine_metadata metadata = {
@@ -137,10 +174,11 @@ int uprobe_WriteHeader(struct pt_regs *ctx) {
 
     // Read the response argument
     void *resp_ptr = GO_PARAM1(ctx);
-
     // Get request struct
     void *req_ptr = 0;
     bpf_probe_read(&req_ptr, sizeof(req_ptr), (void *)(resp_ptr + resp_req_pos));
+
+    bpf_dbg_printk("response %llx, request %llx", resp_ptr, req_ptr);
 
     if (!req_ptr) {
         bpf_printk("can't find req inside the response value");
@@ -191,6 +229,8 @@ int uprobe_WriteHeader(struct pt_regs *ctx) {
             return 0;
         }
     }
+
+    bpf_memcpy(&trace->sc, &invocation->sc, sizeof(struct span_context));
 
     trace->status = (u16)(((u64)GO_PARAM2(ctx)) & 0x0ffff);
 
@@ -359,12 +399,20 @@ int uprobe_writeSubset(struct pt_regs *ctx) {
     }
 
     bpf_dbg_printk("request goaddr %llx", (void*)parent_goaddr);
-
-    traceparent_info info = {
-        .flags = 0
-    };
+    u64 request_parent = find_parent_goroutine((void *)parent_goaddr);
 
     struct span_context sc = generate_span_context();
+    if (request_parent) {
+        func_invocation *parent_inv = bpf_map_lookup_elem(&ongoing_server_requests, &request_parent);
+        bpf_printk("found request parent %llx, parent invocation %llx", request_parent, parent_inv);
+
+        if (parent_inv) {
+            bpf_probe_read(sc.TraceID, sizeof(sc.TraceID), parent_inv->sc.TraceID);
+        }
+    }
+
+    traceparent_info info = {};
+
     span_context_to_w3c_string(&sc, info.traceparent);
     bpf_map_update_elem(&tp_infos, &parent_goaddr, &info, BPF_ANY);
 

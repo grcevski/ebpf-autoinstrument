@@ -16,6 +16,7 @@
 #include "stdbool.h"
 #include "bpf_dbg.h"
 #include "bpf_helpers.h"
+#include "http_trace.h"
 
 #define MAX_BUCKETS 8
 #define W3C_KEY_LENGTH 11
@@ -27,9 +28,7 @@
 #define OFFSET_OF_GO_RUNTIME_HMAP_FIELD_B 9
 #define OFFSET_OF_GO_RUNTIME_HMAP_FIELD_BUCKETS 16
 
-#define TRACE_ID_SIZE 16
 #define TRACE_ID_STRING_SIZE 32
-#define SPAN_ID_SIZE 8
 #define SPAN_ID_STRING_SIZE 16
 
 struct go_string
@@ -72,11 +71,6 @@ struct
     __uint(value_size, sizeof(struct map_bucket));
     __uint(max_entries, 1);
 } golang_mapbucket_storage_map SEC(".maps");
-
-struct span_context {
-    unsigned char TraceID[TRACE_ID_SIZE];
-    unsigned char SpanID[SPAN_ID_SIZE];
-};
 
 // assumes s2 is all lowercase
 static __always_inline int bpf_memicmp(char *s1, char *s2, s32 size)
@@ -198,6 +192,18 @@ static __always_inline void bytes_to_hex_string(unsigned char *pin, u32 size, un
     }
 }
 
+static __always_inline void hex_string_to_bytes(char *str, u32 size, unsigned char *out)
+{
+    for (int i = 0; i < (size / 2); i++)
+    {
+        char ch0 = str[2 * i];
+        char ch1 = str[2 * i + 1];
+        u8 nib0 = (ch0 & 0xF) + (ch0 >> 6) | ((ch0 >> 3) & 0x8);
+        u8 nib1 = (ch1 & 0xF) + (ch1 >> 6) | ((ch1 >> 3) & 0x8);
+        out[i] = (nib0 << 4) | nib1;
+    }
+}
+
 static __always_inline struct span_context generate_span_context()
 {
     struct span_context context = {};
@@ -229,4 +235,20 @@ static __always_inline void span_context_to_w3c_string(struct span_context *ctx,
     // Write sampled
     *out++ = '0';
     *out = '1';
+}
+
+static __always_inline void w3c_string_to_span_context(char *str, struct span_context *ctx)
+{
+    u32 trace_id_start_pos = 3;
+    u32 span_id_start_pod = 36;
+    hex_string_to_bytes(str + trace_id_start_pos, TRACE_ID_STRING_SIZE, ctx->TraceID);
+    hex_string_to_bytes(str + span_id_start_pod, SPAN_ID_STRING_SIZE, ctx->SpanID);
+}
+
+static __always_inline void copy_byte_arrays(unsigned char *dst, unsigned char *src, u32 size)
+{
+    for (int i = 0; i < size; i++)
+    {
+        dst[i] = src[i];
+    }
 }

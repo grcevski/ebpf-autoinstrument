@@ -20,6 +20,13 @@
 #define REMOTE_ADDR_MAX_LEN 50 // We need 48: 39(ip v6 max) + 1(: separator) + 7(port length max value 65535) + 1(null terminator)
 #define HOST_LEN 256 // can be a fully qualified DNS name
 #define TRACEPARENT_LEN 55
+#define TRACE_ID_SIZE 16
+#define SPAN_ID_SIZE 8
+
+struct span_context {
+    unsigned char TraceID[TRACE_ID_SIZE];
+    unsigned char SpanID[SPAN_ID_SIZE];
+};
 
 // Trace of an HTTP call invocation. It is instantiated by the return uprobe and forwarded to the
 // user space through the events ringbuffer.
@@ -39,6 +46,7 @@ typedef struct http_request_trace_t {
     u32 host_port;
     s64 content_length;
     u8  traceparent[TRACEPARENT_LEN];
+    struct span_context sc;
 } __attribute__((packed)) http_request_trace;
 
 #endif

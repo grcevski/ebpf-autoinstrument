@@ -38,6 +38,10 @@ type bpf_debugFuncInvocation struct {
 		Rsp     uint64
 		Ss      uint64
 	}
+	Sc struct {
+		TraceID [16]uint8
+		SpanID  [8]uint8
+	}
 }
 
 type bpf_debugGoroutineMetadata struct {
