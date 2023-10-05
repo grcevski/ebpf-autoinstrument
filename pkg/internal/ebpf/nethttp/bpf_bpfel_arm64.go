@@ -42,7 +42,17 @@ type bpfGoroutineMetadata struct {
 	Timestamp uint64
 }
 
-type bpfTraceparentInfo struct{ Traceparent [55]uint8 }
+type bpfTraceparentInfo struct {
+	Sc struct {
+		TraceID [16]uint8
+		SpanID  [8]uint8
+	}
+	Scp struct {
+		TraceID [16]uint8
+		SpanID  [8]uint8
+	}
+	Flags uint8
+}
 
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {

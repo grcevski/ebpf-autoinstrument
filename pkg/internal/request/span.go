@@ -41,6 +41,8 @@ type Span struct {
 	ServiceName   string
 	Metadata      map[string]string
 	Traceparent   string
+	TraceID       [16]byte
+	SpanID        [8]byte
 }
 
 func (s *Span) Inside(parent *Span) bool {

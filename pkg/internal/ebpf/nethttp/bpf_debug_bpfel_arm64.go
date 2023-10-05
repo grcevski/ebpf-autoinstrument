@@ -42,7 +42,17 @@ type bpf_debugGoroutineMetadata struct {
 	Timestamp uint64
 }
 
-type bpf_debugTraceparentInfo struct{ Traceparent [55]uint8 }
+type bpf_debugTraceparentInfo struct {
+	Sc struct {
+		TraceID [16]uint8
+		SpanID  [8]uint8
+	}
+	Scp struct {
+		TraceID [16]uint8
+		SpanID  [8]uint8
+	}
+	Flags uint8
+}
 
 // loadBpf_debug returns the embedded CollectionSpec for bpf_debug.
 func loadBpf_debug() (*ebpf.CollectionSpec, error) {

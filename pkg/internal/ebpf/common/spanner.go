@@ -41,6 +41,8 @@ func HTTPRequestTraceToSpan(trace *HTTPRequestTrace) request.Span {
 		log.Warn("unknown trace type", "type", trace.Type)
 	}
 
+	log.Info("Span information", "type", trace.Type, "traceID", trace.Sc.TraceID, "spanID", trace.Sc.SpanID)
+
 	return request.Span{
 		Type:          request.EventType(trace.Type),
 		ID:            trace.Id,
@@ -55,6 +57,8 @@ func HTTPRequestTraceToSpan(trace *HTTPRequestTrace) request.Span {
 		End:           int64(trace.EndMonotimeNs),
 		Status:        int(trace.Status),
 		Traceparent:   traceparent,
+		TraceID:       trace.Sc.TraceID,
+		SpanID:        trace.Sc.SpanID,
 	}
 }
 

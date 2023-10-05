@@ -22,7 +22,9 @@
 #define CLIENT_FLAG_NEW 0x1
 
 typedef struct traceparent_info_t {
-    u8 traceparent[TRACEPARENT_LEN];
+    struct span_context sc;
+    struct span_context scp;
+    u8 flags;
 } traceparent_info;
 
 struct {
@@ -78,10 +80,10 @@ int uprobe_ServeHTTP(struct pt_regs *ctx) {
         void *traceparent_ptr = extract_traceparent_from_req_headers((void*)(req_ptr + req_header_ptr_pos));
         if (traceparent_ptr) {
             int cpu = bpf_get_smp_processor_id();
-            char *buf = bpf_map_lookup_elem(&temp_char_buf, &cpu);
+            unsigned char *buf = bpf_map_lookup_elem(&temp_char_buf, &cpu);
             if (buf) {
                 bpf_probe_read(buf, W3C_VAL_LENGTH, traceparent_ptr);
-                w3c_string_to_span_context(buf, &invocation.sc);
+                w3c_string_to_span_context(&invocation.sc, buf);
                 generate_random_bytes(invocation.sc.SpanID, SPAN_ID_SIZE);
             } else {
                 bpf_printk("Error reading temp per CPU storage");
@@ -97,9 +99,10 @@ int uprobe_ServeHTTP(struct pt_regs *ctx) {
     unsigned char *buf = bpf_map_lookup_elem(&temp_char_buf, &cpu);
 
     if (buf) {
-        span_context_to_w3c_string(&invocation.sc, buf);
+        span_context_to_w3c_string(buf, &invocation.sc);
         bpf_dbg_printk("sc %s", buf);
     }
+
     // Write event
     if (bpf_map_update_elem(&ongoing_server_requests, &goroutine_addr, &invocation, BPF_ANY)) {
         bpf_dbg_printk("can't update map element");
@@ -345,18 +348,27 @@ int uprobe_roundTripReturn(struct pt_regs *ctx) {
         return 0;
     }
 
+    // What we do here:
+    // - The traceparent info should have the parent context and the new context
+    // - We stick the parent context in traceparent
+    // - We put the new context in sc
+    // - The wire setting below should use w3c to string on the sc
+    // - If we found traceparent in the headers, send it in sc and leave the traceparent empty
+
     if (tp) {
-        bpf_dbg_printk("found traceparent info %s", tp->traceparent);
-        bpf_probe_read(trace->traceparent, sizeof(tp->traceparent), tp->traceparent);
+        bpf_probe_read(&trace->sc, sizeof(struct span_context), &tp->sc);
+        if (!tp->flags) { // we found parent
+            span_context_to_w3c_string(trace->traceparent, &tp->scp);
+        }
+        bpf_dbg_printk("found traceparent info %s", trace->traceparent);
     } else {
         // Get traceparent from the Request.Header
         void *traceparent_ptr = extract_traceparent_from_req_headers((void*)(req_ptr + req_header_ptr_pos));
         if (traceparent_ptr != NULL) {
-            long res = bpf_probe_read(trace->traceparent, sizeof(trace->traceparent), traceparent_ptr);
-            if (res < 0) {
-                bpf_printk("can't copy traceparent header");
-                bpf_ringbuf_discard(trace, 0);
-                return 0;
+            unsigned char traceparent[TRACEPARENT_LEN];
+            long res = bpf_probe_read(traceparent, sizeof(traceparent), traceparent_ptr);
+            if (res > 0) {
+                w3c_string_to_span_context(&trace->sc, traceparent);
             }
         }
     }
@@ -401,19 +413,30 @@ int uprobe_writeSubset(struct pt_regs *ctx) {
     bpf_dbg_printk("request goaddr %llx", (void*)parent_goaddr);
     u64 request_parent = find_parent_goroutine((void *)parent_goaddr);
 
-    struct span_context sc = generate_span_context();
+    traceparent_info info = {};
+    func_invocation *parent_inv = NULL;
+
     if (request_parent) {
-        func_invocation *parent_inv = bpf_map_lookup_elem(&ongoing_server_requests, &request_parent);
-        bpf_printk("found request parent %llx, parent invocation %llx", request_parent, parent_inv);
+        parent_inv = bpf_map_lookup_elem(&ongoing_server_requests, &request_parent);
+        bpf_dbg_printk("found request parent %llx, parent invocation %llx", request_parent, parent_inv);
 
         if (parent_inv) {
-            bpf_probe_read(sc.TraceID, sizeof(sc.TraceID), parent_inv->sc.TraceID);
+            bpf_probe_read(info.scp.TraceID, sizeof(info.scp.TraceID), parent_inv->sc.TraceID);
+            bpf_probe_read(info.scp.SpanID, sizeof(info.scp.SpanID), parent_inv->sc.SpanID);
+            generate_random_bytes(info.sc.SpanID, SPAN_ID_SIZE);
+            bpf_memcpy(info.sc.TraceID, info.scp.TraceID, TRACE_ID_SIZE);
         }
     }
 
-    traceparent_info info = {};
+    if (!parent_inv) {
+        info.flags = 1;
+        info.sc = generate_span_context();
+    }
 
-    span_context_to_w3c_string(&sc, info.traceparent);
+    unsigned char traceparent[TRACEPARENT_LEN];
+
+    span_context_to_w3c_string(traceparent, &info.sc);
+    bpf_dbg_printk("Writing remote traceparent in headers %s", traceparent);
     bpf_map_update_elem(&tp_infos, &parent_goaddr, &info, BPF_ANY);
 
     void *buf_ptr = 0;
@@ -435,7 +458,7 @@ int uprobe_writeSubset(struct pt_regs *ctx) {
         char end[2] = "\r\n";
         bpf_probe_write_user(buf_ptr + (len & 0x0ffff), key, sizeof(key));
         len += W3C_KEY_LENGTH + 2;
-        bpf_probe_write_user(buf_ptr + (len & 0x0ffff), info.traceparent, sizeof(info.traceparent));
+        bpf_probe_write_user(buf_ptr + (len & 0x0ffff), traceparent, sizeof(traceparent));
         len += W3C_VAL_LENGTH;
         bpf_probe_write_user(buf_ptr + (len & 0x0ffff), end, sizeof(end));
         len += 2;

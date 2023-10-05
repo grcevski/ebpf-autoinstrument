@@ -169,86 +169,69 @@ static __always_inline void *extract_traceparent_from_req_headers(void *headers_
     return NULL;
 }
 
-static __always_inline void generate_random_bytes(unsigned char *buff, u32 size)
-{
-    for (int i = 0; i < (size / 4); i++)
-    {
-        u32 random = bpf_get_prandom_u32();
-        buff[(4 * i)] = (random >> 24) & 0xFF;
-        buff[(4 * i) + 1] = (random >> 16) & 0xFF;
-        buff[(4 * i) + 2] = (random >> 8) & 0xFF;
-        buff[(4 * i) + 3] = random & 0xFF;
+static __always_inline void generate_random_bytes(unsigned char *buff, u32 size) {
+    for (int i = 0; i < size; i+=4) {
+        *((u32 *)&buff[i]) = bpf_get_prandom_u32();
     }
 }
 
 char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-static __always_inline void bytes_to_hex_string(unsigned char *pin, u32 size, unsigned char *out)
-{
-    unsigned char *pout = out;
-    for (u32 i = 0; i < size; i++)
-    {
-        *pout++ = hex[(*pin >> 4) & 0xF];
-        *pout++ = hex[(*pin++) & 0xF];
+static __always_inline void bytes_to_hex_string(unsigned char *dst, unsigned char *src, u32 size) {
+    for (u32 i = 0; i < size; i++) {
+        *dst++ = hex[(*src >> 4) & 0xF];
+        *dst++ = hex[(*src++) & 0xF];
     }
 }
 
-static __always_inline void hex_string_to_bytes(char *str, u32 size, unsigned char *out)
-{
-    for (int i = 0; i < (size / 2); i++)
-    {
-        char ch0 = str[2 * i];
-        char ch1 = str[2 * i + 1];
+static __always_inline void hex_string_to_bytes(unsigned char *dst, unsigned char *src, u32 size) {
+    for (int i = 0; i < (size / 2); i++) {
+        char ch0 = src[2 * i];
+        char ch1 = src[2 * i + 1];
         u8 nib0 = (ch0 & 0xF) + (ch0 >> 6) | ((ch0 >> 3) & 0x8);
         u8 nib1 = (ch1 & 0xF) + (ch1 >> 6) | ((ch1 >> 3) & 0x8);
-        out[i] = (nib0 << 4) | nib1;
+        dst[i] = (nib0 << 4) | nib1;
     }
 }
 
-static __always_inline struct span_context generate_span_context()
-{
+static __always_inline struct span_context generate_span_context() {
     struct span_context context = {};
     generate_random_bytes(context.TraceID, TRACE_ID_SIZE);
     generate_random_bytes(context.SpanID, SPAN_ID_SIZE);
     return context;
 }
 
-static __always_inline void span_context_to_w3c_string(struct span_context *ctx, unsigned char *buff)
-{
+static __always_inline void span_context_to_w3c_string(unsigned char *dst, struct span_context *ctx) {
     // W3C format: version (2 chars) - trace id (32 chars) - span id (16 chars) - sampled (2 chars)
-    unsigned char *out = buff;
 
     // Write version
-    *out++ = '0';
-    *out++ = '0';
-    *out++ = '-';
+    *dst++ = '0';
+    *dst++ = '0';
+    *dst++ = '-';
 
     // Write trace id
-    bytes_to_hex_string(ctx->TraceID, TRACE_ID_SIZE, out);
-    out += TRACE_ID_STRING_SIZE;
-    *out++ = '-';
+    bytes_to_hex_string(dst, ctx->TraceID, TRACE_ID_SIZE);
+    dst += TRACE_ID_STRING_SIZE;
+    *dst++ = '-';
 
     // Write span id
-    bytes_to_hex_string(ctx->SpanID, SPAN_ID_SIZE, out);
-    out += SPAN_ID_STRING_SIZE;
-    *out++ = '-';
+    bytes_to_hex_string(dst, ctx->SpanID, SPAN_ID_SIZE);
+    dst += SPAN_ID_STRING_SIZE;
+    *dst++ = '-';
 
     // Write sampled
-    *out++ = '0';
-    *out = '1';
+    *dst++ = '0';
+    *dst = '1';
 }
 
-static __always_inline void w3c_string_to_span_context(char *str, struct span_context *ctx)
-{
+static __always_inline void w3c_string_to_span_context(struct span_context *ctx, unsigned char *str) {
     u32 trace_id_start_pos = 3;
     u32 span_id_start_pod = 36;
-    hex_string_to_bytes(str + trace_id_start_pos, TRACE_ID_STRING_SIZE, ctx->TraceID);
-    hex_string_to_bytes(str + span_id_start_pod, SPAN_ID_STRING_SIZE, ctx->SpanID);
+    hex_string_to_bytes(ctx->TraceID, str + trace_id_start_pos, TRACE_ID_STRING_SIZE);
+    hex_string_to_bytes(ctx->SpanID, str + span_id_start_pod, SPAN_ID_STRING_SIZE);
 }
 
-static __always_inline void copy_byte_arrays(unsigned char *dst, unsigned char *src, u32 size)
-{
-    for (int i = 0; i < size; i++)
-    {
+static __always_inline void copy_byte_arrays(unsigned char *dst, unsigned char *src, u32 size) {
+    for (int i = 0; i < size; i++) {
         dst[i] = src[i];
     }
 }
