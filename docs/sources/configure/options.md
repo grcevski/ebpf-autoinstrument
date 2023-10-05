@@ -59,11 +59,11 @@ whole Beyla configuration:
 | ----------------- | ----------------- | ------ | ------- |
 | `executable_name` | `EXECUTABLE_NAME` | string | (unset) |
 
-Selects the process to instrument by the executable name path. The tool will match
-this value as a suffix on the full executable command line, including the directory
+Selects the process to instrument by the executable name path. This property accepts
+a regular expression to be matched against the full executable command line, including the directory
 where the executable resides on the file system.
 
-This property will be ignored if the `open_port` property is set.
+If the `open_port` property is set, the executable to be selected needs to match both properties.
 
 When instrumenting by using the executable name, choose a non-ambiguous name, a name that
 will match a single executable on the target system.
@@ -83,9 +83,18 @@ or just `EXECUTABLE_NAME=/server`.
 | ----------- | ----------- | ------ | ------- |
 | `open_port` | `OPEN_PORT` | string | (unset) |
 
-Selects the process to instrument by the port it has open (listens to).
+Selects the process to instrument by the port it has open (listens to). This property
+accepts a comma-separated list of ports (for example, `80`), and port ranges (for example, `8000-8999`).
+If the executable matching only one of the ports in the list, it is considered to match
+the selection criteria.
 
-This property takes precedence over the `executable_name` property.
+For example, specifying the following property:
+```
+open_port: 80,443,8000-8999
+```
+Would make Beyla to select any executable that opens port 80, 443, or any of the ports between 8000 and 8999 included. 
+
+If the `executable_name` property is set, the executable to be selected needs to match both properties.
 
 If an executable opens multiple ports, only one of the ports needs to be specified
 for Beyla **to instrument all the
@@ -216,6 +225,32 @@ Possible values for the `unmatch` property are:
 - `path` will copy the `http.route` field property to the path value.
   - 🚨 Caution: this option could lead to cardinality explosion at the ingester side.
 - `wildcard` will set the `http.route` field property to a generic asterisk based `/**` value.
+- `heuristic` will automatically derive the `http.route` field property from the path value, based on the following rules:
+  - Any path components which have numbers or characters outside of the ASCII alphabet (or `-` and `_`), will be replaced by an asterisk `*`.
+  - Any alphabetical components which don't look like words, will be replaced by an asterisk `*`.
+
+### Special considerations when using the `heuristic` route decorator mode
+
+The `heuristic` decorator is a best effort route decorator, which may still lead to cardinality explosion in certain scenarios.
+For example, the GitHub URL paths are a good example where the `heuristic` route decorator will not work, since the URL paths
+are constructed like a directory tree. In this scenario all paths will remain unique and lead to cardinality explosion.
+
+On the other hand, if your URL path patterns follow certain structure, and the unique IDs are made up of numbers or random characters,
+then the `heuristic` decorator may be a low effort configuration option which is suitable for your use-case. For example, the following
+mock Google Docs URLs will be correctly reduced to a low cardinality version:
+
+Both URL paths below:
+
+```
+document/d/CfMkAGbE_aivhFydEpaRafPuGWbmHfG/edit (no numbers in the ID)
+document/d/C2fMkAGb3E_aivhFyd5EpaRafP123uGWbmHfG/edit
+```
+
+will be converted to a low cardinality route:
+
+```
+document/d/*/edit
+```
 
 ## OTEL metrics exporter
 

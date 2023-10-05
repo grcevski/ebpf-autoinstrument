@@ -19,6 +19,7 @@ import (
 	"github.com/grafana/beyla/pkg/internal/imetrics"
 	"github.com/grafana/beyla/pkg/internal/pipe/global"
 	"github.com/grafana/beyla/pkg/internal/request"
+	"github.com/grafana/beyla/pkg/internal/svc"
 	"github.com/grafana/beyla/pkg/internal/testutil"
 	"github.com/grafana/beyla/pkg/internal/traces"
 	"github.com/grafana/beyla/pkg/internal/transform"
@@ -133,7 +134,7 @@ func TestRouteConsolidation(t *testing.T) {
 		return func(out chan<- []request.Span) {
 			out <- newRequest("svc-1", 1, "GET", "/user/1234", "1.1.1.1:3456", 200)
 			out <- newRequest("svc-1", 2, "GET", "/products/3210/push", "1.1.1.1:3456", 200)
-			out <- newRequest("svc-1", 3, "GET", "/attach", "1.1.1.1:3456", 200) // undefined route: won't report as route
+			out <- newRequest("svc-1", 3, "GET", "/attach", "1.1.1.1:3456", 200)
 			// closing prematurely the input node would finish the whole graph processing
 			// and OTEL exporters could be closed, so we wait.
 			time.Sleep(testTimeout)
@@ -359,7 +360,7 @@ func newRequest(serviceName string, id uint64, method, path, peer string, status
 		Start:        2,
 		RequestStart: 1,
 		End:          3,
-		ServiceName:  serviceName,
+		ServiceID:    svc.ID{Name: serviceName},
 	}}
 }
 
@@ -376,7 +377,7 @@ func newRequestWithTiming(svcName string, id uint64, kind request.EventType, met
 		RequestStart: int64(goStart),
 		Start:        int64(start),
 		End:          int64(end),
-		ServiceName:  svcName,
+		ServiceID:    svc.ID{Name: svcName},
 	}}
 }
 
@@ -392,7 +393,7 @@ func newGRPCRequest(svcName string, id uint64, path string, status int) []reques
 		Start:        2,
 		RequestStart: 1,
 		End:          3,
-		ServiceName:  svcName,
+		ServiceID:    svc.ID{Name: svcName},
 	}}
 }
 
@@ -487,7 +488,7 @@ func newHTTPInfo(method, path, peer string, status int) []request.Span {
 		Start:        2,
 		RequestStart: 2,
 		End:          3,
-		ServiceName:  "comm",
+		ServiceID:    svc.ID{Name: "comm"},
 	}}
 }
 
