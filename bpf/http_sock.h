@@ -41,17 +41,6 @@ struct {
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
 } ongoing_http SEC(".maps");
 
-static __always_inline bool tcp_dup(connection_info_t *http, protocol_info_t *tcp) {
-    u32 *prev_seq = bpf_map_lookup_elem(&http_tcp_seq, http);
-
-    if (prev_seq && (*prev_seq == tcp->seq)) {
-        return true;
-    }
-
-    bpf_map_update_elem(&http_tcp_seq, http, &tcp->seq, BPF_ANY);
-    return false;
-}
-
 static __always_inline bool is_http(unsigned char *p, u32 len, u8 *packet_type) {
     if (len < MIN_HTTP_SIZE) {
         return false;
@@ -74,41 +63,12 @@ static __always_inline bool is_http(unsigned char *p, u32 len, u8 *packet_type) 
     return true;
 }
 
-static __always_inline void read_msghdr_buf(void *target, int buf_len, struct msghdr *msg) {
-    unsigned int m_flags;
-    u8 i_type;
-    size_t iov_offset;
-    size_t count;
-
-    bpf_probe_read_kernel(&m_flags, sizeof(unsigned int), &(msg->msg_flags));
-    bpf_probe_read_kernel(&i_type, sizeof(u8), &(msg->msg_iter.iter_type));
-    bpf_probe_read_kernel(&iov_offset, sizeof(size_t), &(msg->msg_iter.iov_offset));
-    bpf_probe_read_kernel(&count, sizeof(size_t), &(msg->msg_iter.count));
-
-    bpf_dbg_printk("msg flags %x, iter type %d, iov_offset %d, count %d", m_flags, i_type, iov_offset, count);
-
-    struct iovec *iovec;
-    bpf_probe_read_kernel(&iovec, sizeof(struct iovec *), &(msg->msg_iter.iov));        
-    if (i_type == 0) { // IOVEC
-        struct iovec vec;
-        long success = bpf_probe_read_kernel(&vec, sizeof(vec), iovec);
-        bpf_printk("iovec %llx, len %d, success=%d", vec.iov_base, vec.iov_len, success);
-        if (vec.iov_len > 0) {
-            success = bpf_probe_read_user(target, buf_len, (void *)vec.iov_base);
-            bpf_printk("target %llx, success=%d", vec.iov_base, success);
-        } else {            
-            bpf_probe_read(target, buf_len, (void *)iovec);
-            bpf_printk("%llx %llx %llx %llx", target, target + 8, target + 16, target + 24);
-        }
-    } else { // we assume UBUF
-        bpf_probe_read(target, buf_len, (void *)iovec);
-    }    
-}
-
 static __always_inline void* find_msghdr_buf(struct msghdr *msg) {
     u8 i_type;
 
     bpf_probe_read_kernel(&i_type, sizeof(u8), &(msg->msg_iter.iter_type));
+
+    bpf_dbg_printk("find msghdr, iter_type=%d", i_type);
 
     struct iovec *iovec;
     bpf_probe_read_kernel(&iovec, sizeof(struct iovec *), &(msg->msg_iter.iov));        
@@ -119,37 +79,6 @@ static __always_inline void* find_msghdr_buf(struct msghdr *msg) {
     } else { // we assume UBUF
         return (void *)iovec;
     }    
-}
-
-// Copying 16 bytes at a time from the skb buffer is the only way to keep the verifier happy.
-static __always_inline void read_skb_bytes(const void *skb, u32 offset, unsigned char *buf, const u32 len) {
-    u32 max = offset + len;
-    int b = 0;
-    for (; b < (FULL_BUF_SIZE/BUF_COPY_BLOCK_SIZE); b++) {
-        if ((offset + (BUF_COPY_BLOCK_SIZE - 1)) >= max) {
-            break;
-        }
-        bpf_skb_load_bytes(skb, offset, (void *)(&buf[b * BUF_COPY_BLOCK_SIZE]), BUF_COPY_BLOCK_SIZE);
-        offset += BUF_COPY_BLOCK_SIZE;
-    }
-
-    if ((b * BUF_COPY_BLOCK_SIZE) >= len) {
-        return;
-    }
-
-    // This code is messy to make sure the eBPF verifier is happy. I had to cast to signed 64bit.
-    s64 remainder = (s64)max - (s64)offset;
-
-    if (remainder <= 0) {
-        return;
-    }
-
-    int remaining_to_copy = (remainder < (BUF_COPY_BLOCK_SIZE - 1)) ? remainder : (BUF_COPY_BLOCK_SIZE - 1);
-    int space_in_buffer = (len < (b * BUF_COPY_BLOCK_SIZE)) ? 0 : len - (b * BUF_COPY_BLOCK_SIZE);
-
-    if (remaining_to_copy <= space_in_buffer) {
-        bpf_skb_load_bytes(skb, offset, (void *)(&buf[b * BUF_COPY_BLOCK_SIZE]), remaining_to_copy);
-    }
 }
 
 static __always_inline void finish_http(http_info_t *info) {

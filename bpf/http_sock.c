@@ -5,7 +5,6 @@
 #include "bpf_dbg.h"
 #include "pid.h"
 #include "sockaddr.h"
-#include "tcp_info.h"
 #include "ringbuf.h"
 #include "http_sock.h"
 #include "http_ssl.h"

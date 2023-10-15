@@ -6,7 +6,6 @@
 #include "http_defs.h"
 
 #define FULL_BUF_SIZE 160 // should be enough for most URLs, we may need to extend it if not. Must be multiple of 16 for the copy to work.
-#define BUF_COPY_BLOCK_SIZE 16
 #define TRACE_BUF_SIZE 1024 // must be power of 2, we do an & to limit the buffer size
 
 #define CONN_INFO_FLAG_TRACE 0x1
@@ -36,13 +35,6 @@ typedef struct http_info {
     u8  type;
     u8  ssl;
 } http_info_t;
-
-// Here we keep information on the packets passing through the socket filter
-typedef struct protocol_info {
-    u32 hdr_len;
-    u32 seq;
-    u8  flags;
-} protocol_info_t;
 
 // Here we keep information on the ongoing filtered connections, PID/TID and connection type
 typedef struct http_connection_metadata {
@@ -116,10 +108,6 @@ static __always_inline void sort_connection_info(connection_info_t *info) {
         __builtin_memcpy(info->s_addr, info->d_addr, sizeof(info->s_addr));
         __builtin_memcpy(info->d_addr, tmp_addr, sizeof(info->d_addr));
     }
-}
-
-static __always_inline bool client_call(connection_info_t *info) {
-    return likely_ephemeral_port(info->s_port) && !likely_ephemeral_port(info->d_port);
 }
 
 #endif
