@@ -241,26 +241,7 @@ int BPF_KPROBE(kprobe_sys_exit, int status) {
     return 0;
 }
 
-// We start by looking when the SSL handshake is established. In between
-// the start and the end of the SSL handshake, we'll see at least one tcp_sendmsg
-// between the parties. Sandwitching this tcp_sendmsg allows us to grab the sock *
-// and match it with our SSL *. The sock * will give us the connection info that is
-// used by the generic HTTP filter.
-SEC("uprobe/libssl.so:SSL_do_handshake")
-int BPF_UPROBE(uprobe_ssl_do_handshake, void *s) {
-    u64 id = bpf_get_current_pid_tgid();
-
-    if (!valid_pid(id)) {
-        return 0;
-    }
-
-    bpf_dbg_printk("=== uprobe SSL_do_handshake=%d ssl=%llx===", id, s);
-
-    bpf_map_update_elem(&active_ssl_handshakes, &id, &s, BPF_ANY);
-
-    return 0;
-}
-
+// Main HTTP read and write operations are handled with tcp_sendmsg and tcp_recvmsg 
 SEC("kprobe/tcp_sendmsg")
 int BPF_KPROBE(kprobe_tcp_sendmsg, struct sock *sk, struct msghdr *msg, size_t size) {
     u64 id = bpf_get_current_pid_tgid();
@@ -280,7 +261,7 @@ int BPF_KPROBE(kprobe_tcp_sendmsg, struct sock *sk, struct msghdr *msg, size_t s
         if (size > 0) {
             void *iovec_ptr = find_msghdr_buf(msg);
             if (iovec_ptr) {
-                handle_msghdr_with_connection(&info, iovec_ptr, size);
+                handle_buf_with_connection(&info, iovec_ptr, size, 0);
             } else {
                 bpf_dbg_printk("can't find iovec ptr in msghdr, not tracking sendmsg");
             }
@@ -296,6 +277,81 @@ int BPF_KPROBE(kprobe_tcp_sendmsg, struct sock *sk, struct msghdr *msg, size_t s
         bpf_dbg_printk("=== kprobe SSL tcp_sendmsg=%d sock=%llx ssl=%llx ===", id, sk, ssl);
         bpf_map_update_elem(&ssl_to_conn, &ssl, &info, BPF_ANY);
     }
+
+    return 0;
+}
+
+//int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len)
+SEC("kprobe/tcp_recvmsg")
+int BPF_KPROBE(kprobe_tcp_recvmsg, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len) {
+    u64 id = bpf_get_current_pid_tgid();
+
+    if (!valid_pid(id)) {
+        return 0;
+    }
+
+    bpf_printk("=== tcp_recvmsg id=%d sock=%llx ===", id, sk);
+
+    // Important: We must work here to remember the iovec pointer, since the msghdr structure
+    // can get modified in non-reversible way if the incoming packet is large and broken down in parts. 
+    recv_args_t args = {
+        .sock_ptr = (u64)sk,
+        .iovec_ptr = (u64)find_msghdr_buf(msg)
+    };
+
+    bpf_map_update_elem(&active_recv_args, &id, &args, BPF_ANY);
+
+    return 0;
+}
+
+SEC("kretprobe/tcp_recvmsg")
+int BPF_KRETPROBE(kretprobe_tcp_recvmsg, int copied_len) {
+    u64 id = bpf_get_current_pid_tgid();
+
+    if (!valid_pid(id)) {
+        return 0;
+    }
+
+    recv_args_t *args = bpf_map_lookup_elem(&active_recv_args, &id);
+    bpf_map_delete_elem(&active_recv_args, &id);
+
+    if (!args || (copied_len <= 0)) {
+        return 0;
+    }
+
+    bpf_dbg_printk("=== tcp_recvmsg ret id=%d sock=%llx copied_len %d ===", id, args->sock_ptr, copied_len);
+
+    if (!args->iovec_ptr) {
+        bpf_dbg_printk("iovec_ptr found in kprobe is NULL, ignoring this tcp_recvmsg");
+    }
+
+    connection_info_t info = {};
+
+    if (parse_sock_info((struct sock *)args->sock_ptr, &info)) {
+        sort_connection_info(&info);
+        //dbg_print_http_connection_info(&info);
+        handle_buf_with_connection(&info, (void *)args->iovec_ptr, copied_len, 0);
+    }
+
+    return 0;
+}
+
+// We start by looking when the SSL handshake is established. In between
+// the start and the end of the SSL handshake, we'll see at least one tcp_sendmsg
+// between the parties. Sandwitching this tcp_sendmsg allows us to grab the sock *
+// and match it with our SSL *. The sock * will give us the connection info that is
+// used by the generic HTTP filter.
+SEC("uprobe/libssl.so:SSL_do_handshake")
+int BPF_UPROBE(uprobe_ssl_do_handshake, void *s) {
+    u64 id = bpf_get_current_pid_tgid();
+
+    if (!valid_pid(id)) {
+        return 0;
+    }
+
+    bpf_dbg_printk("=== uprobe SSL_do_handshake=%d ssl=%llx===", id, s);
+
+    bpf_map_update_elem(&active_ssl_handshakes, &id, &s, BPF_ANY);
 
     return 0;
 }
@@ -497,59 +553,6 @@ int BPF_UPROBE(uprobe_ssl_shutdown, void *s) {
 
     bpf_map_delete_elem(&ssl_to_conn, &s);
     bpf_map_delete_elem(&pid_tid_to_conn, &id);
-
-    return 0;
-}
-
-//int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len)
-SEC("kprobe/tcp_recvmsg")
-int BPF_KPROBE(kprobe_tcp_recvmsg, struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len) {
-    u64 id = bpf_get_current_pid_tgid();
-
-    if (!valid_pid(id)) {
-        return 0;
-    }
-
-    bpf_printk("=== tcp_recvmsg id=%d sock=%llx ===", id, sk);
-
-    recv_args_t args = {
-        .sock_ptr = (u64)sk,
-        .iovec_ptr = (u64)find_msghdr_buf(msg)
-    };
-
-    bpf_map_update_elem(&active_recv_args, &id, &args, BPF_ANY);
-
-    return 0;
-}
-
-SEC("kretprobe/tcp_recvmsg")
-int BPF_KRETPROBE(kretprobe_tcp_recvmsg, int copied_len) {
-    u64 id = bpf_get_current_pid_tgid();
-
-    if (!valid_pid(id)) {
-        return 0;
-    }
-
-    recv_args_t *args = bpf_map_lookup_elem(&active_recv_args, &id);
-    bpf_map_delete_elem(&active_recv_args, &id);
-
-    if (!args || (copied_len <= 0)) {
-        return 0;
-    }
-
-    bpf_dbg_printk("=== tcp_recvmsg ret id=%d sock=%llx copied_len %d ===", id, args->sock_ptr, copied_len);
-
-    if (!args->iovec_ptr) {
-        bpf_dbg_printk("iovec_ptr found in kprobe is NULL, ignoring this tcp_recvmsg");
-    }
-
-    connection_info_t info = {};
-
-    if (parse_sock_info((struct sock *)args->sock_ptr, &info)) {
-        sort_connection_info(&info);
-        //dbg_print_http_connection_info(&info);
-        handle_msghdr_with_connection(&info, (void *)args->iovec_ptr, copied_len);
-    }
 
     return 0;
 }

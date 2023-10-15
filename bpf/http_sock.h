@@ -151,9 +151,9 @@ static __always_inline void handle_http_response(unsigned char *small_buf, conne
     finish_http(info);
 }
 
-static __always_inline http_buf_t *make_http_trace_buf(void *u_buf, int size, connection_info_t *conn) {
+static __always_inline void send_http_trace_buf(void *u_buf, int size, connection_info_t *conn) {
     if (size <= 0) {
-        return NULL;
+        return;
     }
 
     http_buf_t *trace = bpf_ringbuf_reserve(&events, sizeof(http_buf_t), 0);
@@ -171,11 +171,13 @@ static __always_inline http_buf_t *make_http_trace_buf(void *u_buf, int size, co
         if (buf_len < TRACE_BUF_SIZE) {
             trace->buf[buf_len] = '\0';
         }
+        
+        bpf_dbg_printk("Sending http buffer %s", trace->buf);
+        bpf_ringbuf_submit(trace, get_flags());
     }
-    return trace;
 }
 
-static __always_inline void handle_msghdr_with_connection(connection_info_t *conn, void *u_buf, int bytes_len) {
+static __always_inline void handle_buf_with_connection(connection_info_t *conn, void *u_buf, int bytes_len, u8 ssl) {
     unsigned char small_buf[MIN_HTTP_SIZE] = {0};
     bpf_probe_read(small_buf, MIN_HTTP_SIZE, u_buf);
 
@@ -185,6 +187,7 @@ static __always_inline void handle_msghdr_with_connection(connection_info_t *con
     if (is_http(small_buf, MIN_HTTP_SIZE, &packet_type)) {
         http_info_t in = {0};
         in.conn_info = *conn;
+        in.ssl = ssl;
 
         http_info_t *info = get_or_set_http_info(&in, packet_type);
         if (!info) {
@@ -194,17 +197,11 @@ static __always_inline void handle_msghdr_with_connection(connection_info_t *con
         bpf_dbg_printk("=== http_buffer_event len=%d pid=%d still_reading=%d ===", bytes_len, pid_from_pid_tgid(bpf_get_current_pid_tgid()), still_reading(info));
 
         if (packet_type == PACKET_TYPE_REQUEST && (info->status == 0)) {
-            http_buf_t *trace = make_http_trace_buf(u_buf, bytes_len, conn);
-            if (trace) {
-                // we copy some small part of the buffer to the info trace event, so that we can process an event even with
-                // incomplete trace info in user space.
-                bpf_probe_read(info->buf, FULL_BUF_SIZE, u_buf);
-                bpf_dbg_printk("Sending http buffer %s", trace->buf);
-                bpf_ringbuf_submit(trace, get_flags());
-            } else {
-                bpf_probe_read(info->buf, FULL_BUF_SIZE, u_buf);
-            }
-
+            send_http_trace_buf(u_buf, bytes_len, conn);
+            
+            // we copy some small part of the buffer to the info trace event, so that we can process an event even with
+            // incomplete trace info in user space.
+            bpf_probe_read(info->buf, FULL_BUF_SIZE, u_buf);
             process_http_request(info, bytes_len);
         } else if (packet_type == PACKET_TYPE_RESPONSE) {
             handle_http_response(small_buf, conn, info, bytes_len);

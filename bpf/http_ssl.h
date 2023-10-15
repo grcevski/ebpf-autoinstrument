@@ -72,58 +72,6 @@ struct {
     __type(value, ssl_args_t);
 } active_ssl_write_args SEC(".maps");
 
-static __always_inline http_buf_t* make_ssl_trace_buf(void *orig_buf, int orig_len, connection_info_t *info) {
-    http_buf_t *trace = bpf_ringbuf_reserve(&events, sizeof(http_buf_t), 0);
-    if (trace) {
-        trace->conn_info = *info;
-        trace->flags |= CONN_INFO_FLAG_TRACE;
-
-        int buf_len = orig_len & (TRACE_BUF_SIZE - 1);
-        bpf_probe_read(&trace->buf, buf_len, orig_buf);
-        
-        if (buf_len < TRACE_BUF_SIZE) {
-            trace->buf[buf_len] = '\0';
-        }
-    }
-
-    return trace;
-}
-
-static __always_inline void handle_ssl_buf_with_connection(connection_info_t *conn, ssl_args_t *args, int bytes_len) {
-    unsigned char buf[MIN_HTTP_SIZE] = {0};
-    bpf_probe_read(buf, MIN_HTTP_SIZE, (void *)args->buf);
-
-    u8 packet_type = 0;
-    if (is_http(buf, MIN_HTTP_SIZE, &packet_type)) {
-        http_info_t in = {0};
-        in.conn_info = *conn;
-        in.ssl = 1;
-
-        http_info_t *info = get_or_set_http_info(&in, packet_type);
-        if (!info) {
-            return;
-        }
-
-        bpf_dbg_printk("=== SSL http_buffer_event len=%d pid=%d still_reading=%d ===", bytes_len, pid_from_pid_tgid(bpf_get_current_pid_tgid()), still_reading(info));
-
-        if (packet_type == PACKET_TYPE_REQUEST && (info->status == 0)) {
-            http_buf_t *trace = make_ssl_trace_buf((void *)args->buf, bytes_len, conn);
-            if (trace) {
-                // we copy some small part of the buffer to the info trace event, so that we can process an event even with
-                // incomplete trace info in user space.
-                bpf_memcpy(info->buf, trace->buf, FULL_BUF_SIZE);
-                bpf_ringbuf_submit(trace, get_flags());
-            } else {
-                bpf_probe_read(info->buf, FULL_BUF_SIZE, (void *)args->buf);
-            }
-
-            process_http_request(info, bytes_len);
-        } else if (packet_type == PACKET_TYPE_RESPONSE) {
-            handle_http_response(buf, conn, info, bytes_len);
-        }        
-    }
-}
-
 static __always_inline void handle_ssl_buf(u64 id, ssl_args_t *args, int bytes_len) {
     if (args && bytes_len > 0) {
         void *ssl = ((void *)args->ssl);
@@ -169,6 +117,9 @@ static __always_inline void handle_ssl_buf(u64 id, ssl_args_t *args, int bytes_l
 
 
         if (!conn) {
+            // At this point the threading in the language doesn't allow us to properly match the SSL* with
+            // the connection info. We send partial event, at least we can find the path, timing and response.
+            // even though we won't have peer information.
             connection_info_t c = {};
             bpf_dbg_printk("setting fake connection info ssl=%llx", ssl);
             bpf_memcpy(&c.s_addr, &ssl, sizeof(void *));
@@ -179,7 +130,7 @@ static __always_inline void handle_ssl_buf(u64 id, ssl_args_t *args, int bytes_l
         }
 
         if (conn) {
-            handle_ssl_buf_with_connection(conn, args, bytes_len);
+            handle_buf_with_connection(conn, (void *)args->buf, bytes_len, 1);
         } else {
             bpf_dbg_printk("No connection info! This is a bug.");
         }
