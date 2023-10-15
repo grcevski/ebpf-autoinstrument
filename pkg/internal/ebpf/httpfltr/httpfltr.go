@@ -136,7 +136,7 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.FunctionPrograms {
 			Start:    p.bpfObjects.KprobeTcpSendmsg,
 		},
 		// Reading more than 160 bytes
-		"tcp_recvmsg_locked": {
+		"tcp_recvmsg": {
 			Required: true,
 			Start:    p.bpfObjects.KprobeTcpRecvmsg,
 			End:      p.bpfObjects.KretprobeTcpRecvmsg,

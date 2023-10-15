@@ -279,7 +279,9 @@ static __always_inline void handle_msghdr_with_connection(connection_info_t *con
             process_http_request(info, bytes_len);
         } else if (packet_type == PACKET_TYPE_RESPONSE) {
             handle_http_response(small_buf, conn, info, bytes_len);
-        }        
+        } else if (still_reading(info)) {
+            info->len += bytes_len;
+        }       
     }
 }
 
