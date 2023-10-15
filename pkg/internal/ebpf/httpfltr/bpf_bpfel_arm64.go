@@ -42,15 +42,15 @@ type bpfHttpInfoT struct {
 	Buf             [160]uint8
 	Pid             uint32
 	Len             uint32
+	RespLen         uint32
 	Status          uint16
 	Type            uint8
 	Ssl             uint8
-	_               [4]byte
 }
 
 type bpfRecvArgsT struct {
-	SockPtr   uint64
-	MsghdrPtr uint64
+	SockPtr  uint64
+	IovecPtr uint64
 }
 
 type bpfSockArgsT struct {
@@ -114,7 +114,6 @@ type bpfProgramSpecs struct {
 	KretprobeSysAccept4     *ebpf.ProgramSpec `ebpf:"kretprobe_sys_accept4"`
 	KretprobeSysConnect     *ebpf.ProgramSpec `ebpf:"kretprobe_sys_connect"`
 	KretprobeTcpRecvmsg     *ebpf.ProgramSpec `ebpf:"kretprobe_tcp_recvmsg"`
-	SocketHttpFilter        *ebpf.ProgramSpec `ebpf:"socket__http_filter"`
 	UprobeSslDoHandshake    *ebpf.ProgramSpec `ebpf:"uprobe_ssl_do_handshake"`
 	UprobeSslRead           *ebpf.ProgramSpec `ebpf:"uprobe_ssl_read"`
 	UprobeSslReadEx         *ebpf.ProgramSpec `ebpf:"uprobe_ssl_read_ex"`
@@ -215,7 +214,6 @@ type bpfPrograms struct {
 	KretprobeSysAccept4     *ebpf.Program `ebpf:"kretprobe_sys_accept4"`
 	KretprobeSysConnect     *ebpf.Program `ebpf:"kretprobe_sys_connect"`
 	KretprobeTcpRecvmsg     *ebpf.Program `ebpf:"kretprobe_tcp_recvmsg"`
-	SocketHttpFilter        *ebpf.Program `ebpf:"socket__http_filter"`
 	UprobeSslDoHandshake    *ebpf.Program `ebpf:"uprobe_ssl_do_handshake"`
 	UprobeSslRead           *ebpf.Program `ebpf:"uprobe_ssl_read"`
 	UprobeSslReadEx         *ebpf.Program `ebpf:"uprobe_ssl_read_ex"`
@@ -240,7 +238,6 @@ func (p *bpfPrograms) Close() error {
 		p.KretprobeSysAccept4,
 		p.KretprobeSysConnect,
 		p.KretprobeTcpRecvmsg,
-		p.SocketHttpFilter,
 		p.UprobeSslDoHandshake,
 		p.UprobeSslRead,
 		p.UprobeSslReadEx,

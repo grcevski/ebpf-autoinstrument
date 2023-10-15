@@ -136,7 +136,7 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.FunctionPrograms {
 			Start:    p.bpfObjects.KprobeTcpSendmsg,
 		},
 		// Reading more than 160 bytes
-		"tcp_recvmsg": {
+		"tcp_recvmsg_locked": {
 			Required: true,
 			Start:    p.bpfObjects.KprobeTcpRecvmsg,
 			End:      p.bpfObjects.KretprobeTcpRecvmsg,
@@ -217,7 +217,7 @@ func (p *Tracer) UProbes() map[string]map[string]ebpfcommon.FunctionPrograms {
 }
 
 func (p *Tracer) SocketFilters() []*ebpf.Program {
-	return []*ebpf.Program{p.bpfObjects.SocketHttpFilter}
+	return nil
 }
 
 func (p *Tracer) Run(ctx context.Context, eventsChan chan<- []request.Span, service svc.ID) {
