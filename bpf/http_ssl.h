@@ -72,7 +72,7 @@ struct {
     __type(value, ssl_args_t);
 } active_ssl_write_args SEC(".maps");
 
-static __always_inline void send_trace_buff(void *orig_buf, int orig_len, connection_info_t *info) {
+static __always_inline http_buf_t* make_ssl_trace_buf(void *orig_buf, int orig_len, connection_info_t *info) {
     http_buf_t *trace = bpf_ringbuf_reserve(&events, sizeof(http_buf_t), 0);
     if (trace) {
         trace->conn_info = *info;
@@ -84,21 +84,17 @@ static __always_inline void send_trace_buff(void *orig_buf, int orig_len, connec
         if (buf_len < TRACE_BUF_SIZE) {
             trace->buf[buf_len] = '\0';
         }
-
-        /*bpf_dbg_printk("Sending buffer %c%c%c%c%c%c%c%c%c%c, copied_size %d", 
-            trace->buf[0], trace->buf[1], trace->buf[2], 
-            trace->buf[3], trace->buf[4], trace->buf[5],
-            trace->buf[6], trace->buf[7], trace->buf[8],
-            trace->buf[9], orig_len);
-        */
-
-        bpf_ringbuf_submit(trace, get_flags());
     }
+
+    return trace;
 }
 
-static __always_inline void https_buffer_event(void *buf, int len, connection_info_t *conn, void *orig_buf, int orig_len) {
+static __always_inline void handle_ssl_buf_with_connection(connection_info_t *conn, ssl_args_t *args, int bytes_len) {
+    unsigned char buf[MIN_HTTP_SIZE] = {0};
+    bpf_probe_read(buf, MIN_HTTP_SIZE, (void *)args->buf);
+
     u8 packet_type = 0;
-    if (is_http(buf, len, &packet_type)) {
+    if (is_http(buf, MIN_HTTP_SIZE, &packet_type)) {
         http_info_t in = {0};
         in.conn_info = *conn;
         in.ssl = 1;
@@ -108,36 +104,23 @@ static __always_inline void https_buffer_event(void *buf, int len, connection_in
             return;
         }
 
-        bpf_dbg_printk("=== https_filter len=%d pid=%d still_reading=%d ===", len, pid_from_pid_tgid(bpf_get_current_pid_tgid()), still_reading(info));
-        //dbg_print_http_connection_info(conn); // commented out since GitHub CI doesn't like this call
+        bpf_dbg_printk("=== SSL http_buffer_event len=%d pid=%d still_reading=%d ===", bytes_len, pid_from_pid_tgid(bpf_get_current_pid_tgid()), still_reading(info));
 
         if (packet_type == PACKET_TYPE_REQUEST && (info->status == 0)) {
-            send_trace_buff(orig_buf, orig_len, conn);
-            process_http_request(info);
-            info->len = len;
-            bpf_memcpy(info->buf, buf, FULL_BUF_SIZE);
+            http_buf_t *trace = make_ssl_trace_buf((void *)args->buf, bytes_len, conn);
+            if (trace) {
+                // we copy some small part of the buffer to the info trace event, so that we can process an event even with
+                // incomplete trace info in user space.
+                bpf_memcpy(info->buf, trace->buf, FULL_BUF_SIZE);
+                bpf_ringbuf_submit(trace, get_flags());
+            } else {
+                bpf_probe_read(info->buf, FULL_BUF_SIZE, (void *)args->buf);
+            }
+
+            process_http_request(info, bytes_len);
         } else if (packet_type == PACKET_TYPE_RESPONSE) {
-            http_connection_metadata_t *meta = bpf_map_lookup_elem(&filtered_connections, conn);
-            http_connection_metadata_t dummy_meta = {
-                .id = bpf_get_current_pid_tgid(),
-                .type = EVENT_HTTP_REQUEST
-            };
-
-            if (!meta) {
-                meta = &dummy_meta;
-            }
-
-            process_http_response(info, buf, meta);
-
-            // We sometimes don't see the TCP close in the filter, I wish we didn't have to 
-            // do this here, but let the filter handle it.
-            if (still_responding(info)) {
-                info->end_monotime_ns = bpf_ktime_get_ns();
-            }
-            finish_http(info);
-        }
-
-        // we let the regular socket filter do the rest
+            handle_http_response(buf, conn, info, bytes_len);
+        }        
     }
 }
 
@@ -196,18 +179,7 @@ static __always_inline void handle_ssl_buf(u64 id, ssl_args_t *args, int bytes_l
         }
 
         if (conn) {
-            void *read_buf = (void *)args->buf;
-            char buf[FULL_BUF_SIZE] = {0};
-            
-            u32 len = bytes_len & 0x0fffffff; // keep the verifier happy
-
-            if (len > FULL_BUF_SIZE) {
-                len = FULL_BUF_SIZE;
-            }
-
-            bpf_probe_read(&buf, len * sizeof(char), read_buf);
-            bpf_dbg_printk("buffer from SSL %s", buf);
-            https_buffer_event(buf, len, conn, read_buf, bytes_len);
+            handle_ssl_buf_with_connection(conn, args, bytes_len);
         } else {
             bpf_dbg_printk("No connection info! This is a bug.");
         }

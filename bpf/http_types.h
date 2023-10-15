@@ -31,6 +31,7 @@ typedef struct http_info {
     unsigned char buf[FULL_BUF_SIZE] __attribute__ ((aligned (8))); // ringbuffer memcpy complains unless this is 8 byte aligned
     u32 pid; // we need this for system wide tracking so we can find the service name
     u32 len;
+    u32 resp_len;
     u16 status;    
     u8  type;
     u8  ssl;
