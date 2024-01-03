@@ -505,7 +505,7 @@ func testHTTPTracesNestedGRPC(t *testing.T) {
 	traceID = createTraceID()
 	parentID = createParentID()
 	traceparent := createTraceparent(traceID, parentID)
-	doHTTPGetWithTraceparent(t, "http://localhost:8080/echoCall", 204, traceparent)
+	doHTTPGetWithTraceparent(t, "http://localhost:8080/echoCall2", 204, traceparent)
 	// Do some requests to make sure we see all events
 	for i := 0; i < 10; i++ {
 		doHTTPGet(t, "http://localhost:8080/metrics", 200)
@@ -513,7 +513,7 @@ func testHTTPTracesNestedGRPC(t *testing.T) {
 
 	var trace jaeger.Trace
 	test.Eventually(t, testTimeout, func(t require.TestingT) {
-		resp, err := http.Get(jaegerQueryURL + "?service=testserver&operation=GET%20%2FechoCall")
+		resp, err := http.Get(jaegerQueryURL + "?service=testserver&operation=GET%20%2FechoCall2")
 		require.NoError(t, err)
 		if resp == nil {
 			return
@@ -521,13 +521,13 @@ func testHTTPTracesNestedGRPC(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		var tq jaeger.TracesQuery
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&tq))
-		traces := tq.FindBySpan(jaeger.Tag{Key: "url.path", Type: "string", Value: "/echoCall"})
+		traces := tq.FindBySpan(jaeger.Tag{Key: "url.path", Type: "string", Value: "/echoCall2"})
 		require.Len(t, traces, 1)
 		trace = traces[0]
 	}, test.Interval(100*time.Millisecond))
 
 	// Check the information of the parent span
-	res := trace.FindByOperationName("GET /echoCall")
+	res := trace.FindByOperationName("GET /echoCall2")
 	require.Len(t, res, 1)
 	server := res[0]
 	require.NotEmpty(t, server.TraceID)
@@ -541,9 +541,9 @@ func testHTTPTracesNestedGRPC(t *testing.T) {
 	sd := server.Diff(
 		jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
 		jaeger.Tag{Key: "http.response.status_code", Type: "int64", Value: float64(204)},
-		jaeger.Tag{Key: "url.path", Type: "string", Value: "/echoCall"},
+		jaeger.Tag{Key: "url.path", Type: "string", Value: "/echoCall2"},
 		jaeger.Tag{Key: "server.port", Type: "int64", Value: float64(8080)},
-		jaeger.Tag{Key: "http.route", Type: "string", Value: "/echo"},
+		jaeger.Tag{Key: "http.route", Type: "string", Value: "/echoCall2"},
 		jaeger.Tag{Key: "span.kind", Type: "string", Value: "server"},
 	)
 	assert.Empty(t, sd, sd.String())
