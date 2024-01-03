@@ -25,7 +25,12 @@ func HTTPHandler(log *slog.Logger, echoPort int) http.HandlerFunc {
 		}
 
 		if req.RequestURI == "/echoCall" {
-			echoCall(rw)
+			echoCall(rw, "localhost", 50051)
+			return
+		}
+
+		if req.RequestURI == "/echoCall2" {
+			echoCall(rw, "grpcserver", 50052)
 			return
 		}
 
@@ -100,9 +105,9 @@ func echo(rw http.ResponseWriter, port int) {
 	rw.WriteHeader(res.StatusCode)
 }
 
-func echoCall(rw http.ResponseWriter) {
+func echoCall(rw http.ResponseWriter, host string, port int) {
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	conn, err := grpc.Dial("localhost:50051", opts...)
+	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, port), opts...)
 	if err != nil {
 		slog.Error("fail to dial", err)
 		rw.WriteHeader(500)

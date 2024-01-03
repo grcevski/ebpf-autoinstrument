@@ -16,6 +16,16 @@ services:
     environment:
       LOG_LEVEL: DEBUG
 
+  grpcserver:
+    build:
+      context: ../..
+      dockerfile: test/integration/components/testserver/Dockerfile_grpc
+    image: hatest-grpcserver
+    ports:
+      - "50052:50052"
+    environment:
+      LOG_LEVEL: DEBUG
+
   autoinstrumenter:
     build:
       context: ../..
@@ -49,6 +59,39 @@ services:
       BEYLA_HOSTNAME: "beyla"
     ports:
       - "8999:8999" # Prometheus scrape port, if enabled via config
+
+  autoinstrumenter2:
+    build:
+      context: ../..
+      dockerfile: ./test/integration/components/beyla/Dockerfile
+    command:
+      - /beyla
+      - --config=/configs/instrumenter-config${INSTRUMENTER_CONFIG_SUFFIX}.yml
+    volumes:
+      - ./configs/:/configs
+      - ./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security
+      - ../../testoutput:/coverage
+      - ../../testoutput/run2:/var/run/beyla
+    image: hatest-autoinstrumenter2
+    privileged: true # in some environments (not GH Pull Requests) you can set it to false and then cap_add: [ SYS_ADMIN ]
+    pid: "service:grpcserver"
+    environment:
+      GOCOVERDIR: "/coverage"
+      BEYLA_PRINT_TRACES: "true"
+      BEYLA_OPEN_PORT: "50052"
+      BEYLA_DISCOVERY_POLL_INTERVAL: 500ms
+      BEYLA_SKIP_GO_SPECIFIC_TRACERS: "${BEYLA_SKIP_GO_SPECIFIC_TRACERS}"
+      BEYLA_SERVICE_NAMESPACE: "integration-test"
+      BEYLA_METRICS_INTERVAL: "10ms"
+      BEYLA_BPF_BATCH_TIMEOUT: "10ms"
+      BEYLA_LOG_LEVEL: "DEBUG"
+      BEYLA_BPF_DEBUG: "TRUE"
+      BEYLA_METRICS_REPORT_TARGET: "true"
+      BEYLA_METRICS_REPORT_PEER: "true"
+      BEYLA_INTERNAL_METRICS_PROMETHEUS_PORT: 8999
+      BEYLA_HOSTNAME: "beyla"
+    ports:
+      - "9999:8999" # Prometheus scrape port, if enabled via config
 
   # OpenTelemetry Collector for Metrics. For Traces, we use directly Jaeger
   otelcol:
