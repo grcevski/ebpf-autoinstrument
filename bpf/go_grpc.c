@@ -427,7 +427,7 @@ int uprobe_transport_http2Client_NewStream(struct pt_regs *ctx) {
             // seen later by writeHeader to clean up this mapping.
             bpf_map_update_elem(&ongoing_streams, &next_id, &inv_save, BPF_ANY);
         } else {
-            bpf_dbg_printk("Couldn't find invocation metadata for goroutite %lx", goroutine_addr);
+            bpf_dbg_printk("Couldn't find invocation metadata for goroutine %lx", goroutine_addr);
         }
     }
     

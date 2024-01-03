@@ -121,11 +121,14 @@ func echoCall(rw http.ResponseWriter, host string, port int) {
 	slog.Debug("Getting feature for point", "lat", point.Latitude, "long", point.Longitude)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err = client.GetFeature(ctx, point)
+	feature, err := client.GetFeature(ctx, point)
 	if err != nil {
 		slog.Error("client.GetFeature failed", err)
 		rw.WriteHeader(500)
 		return
+	}
+	if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
+		fmt.Println(feature)
 	}
 	rw.WriteHeader(204)
 }
