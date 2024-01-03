@@ -6,16 +6,16 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/grafana/beyla/test/integration/components/testserver/arg"
 	pb "github.com/grafana/beyla/test/integration/components/testserver/grpc/routeguide"
+
+	client "github.com/grafana/beyla/test/integration/components/testserver/grpc/client"
 )
 
-func HTTPHandler(log *slog.Logger, echoPort int) http.HandlerFunc {
+func HTTPHandler(log *slog.Logger, grpcClient pb.RouteGuideClient, echoPort int) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		log.Debug("received request", "url", req.RequestURI)
 
@@ -24,13 +24,8 @@ func HTTPHandler(log *slog.Logger, echoPort int) http.HandlerFunc {
 			return
 		}
 
-		if req.RequestURI == "/echoCall" {
-			echoCall(rw, "localhost", 50051)
-			return
-		}
-
-		if req.RequestURI == "/echoCall2" {
-			echoCall(rw, "grpcserver", 50052)
+		if strings.HasPrefix(req.RequestURI, "/echoCall") {
+			echoCall(rw, grpcClient)
 			return
 		}
 
@@ -105,23 +100,13 @@ func echo(rw http.ResponseWriter, port int) {
 	rw.WriteHeader(res.StatusCode)
 }
 
-func echoCall(rw http.ResponseWriter, host string, port int) {
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, port), opts...)
-	if err != nil {
-		slog.Error("fail to dial", err)
-		rw.WriteHeader(500)
-		return
-	}
-	defer conn.Close()
-	client := pb.NewRouteGuideClient(conn)
-
+func echoCall(rw http.ResponseWriter, grpcClient pb.RouteGuideClient) {
 	point := &pb.Point{Latitude: 409146138, Longitude: -746188906}
 
 	slog.Debug("Getting feature for point", "lat", point.Latitude, "long", point.Longitude)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	feature, err := client.GetFeature(ctx, point)
+	feature, err := grpcClient.GetFeature(ctx, point)
 	if err != nil {
 		slog.Error("client.GetFeature failed", err)
 		rw.WriteHeader(500)
@@ -135,8 +120,16 @@ func echoCall(rw http.ResponseWriter, host string, port int) {
 
 func Setup(port int) {
 	log := slog.With("component", "std.Server")
+
+	client, closer, err := client.NewDefaultClient()
+	defer closer.Close()
+	if err != nil {
+		log.Error("Can't instantiate grpcClient", err)
+		return
+	}
+
 	address := fmt.Sprintf(":%d", port)
 	log.Info("starting HTTP server", "address", address)
-	err := http.ListenAndServe(address, HTTPHandler(log, port))
+	err = http.ListenAndServe(address, HTTPHandler(log, client, port))
 	log.Error("HTTP server has unexpectedly stopped", err)
 }

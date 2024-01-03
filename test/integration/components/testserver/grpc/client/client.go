@@ -72,6 +72,10 @@ func printFeature(client pb.RouteGuideClient, point *pb.Point) {
 	}
 }
 
+func NewDefaultClient() (pb.RouteGuideClient, io.Closer, error) {
+	return newClient(&defaultPingOpts)
+}
+
 func newClient(po *pingOpts) (pb.RouteGuideClient, io.Closer, error) {
 	// Use INFO as default log
 	var opts []grpc.DialOption
