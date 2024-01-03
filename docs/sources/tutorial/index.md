@@ -113,7 +113,7 @@ BEYLA_PRINT_TRACES=true BEYLA_OPEN_PORT=8080 sudo -E beyla
 ```
 
 The `BEYLA_PRINT_TRACES=true` configuration option tells Beyla to log any trace to the standard output.
-The `BEYLA_OPEN_PORT=true` option tells Beyla to instrument the service that owns the port 8080.
+The `BEYLA_OPEN_PORT=8080` option tells Beyla to instrument the service that owns the port 8080.
 Since Beyla requires administrator rights to load eBPF programs, the `beyla` command
 must run with `sudo -E` (or as a `root` user).
 
@@ -182,15 +182,15 @@ There are two ways to forward your OpenTelemetry traces to Grafana Cloud:
 
 ### Running Grafana Beyla with your Grafana Credentials
 
-In your Grafana Cloud Portal, click on the "Details" button in the "Grafana" box. Next,
-copy your Grafana Instance ID and Zone, as in the image below.
+In your Grafana Cloud Portal, click on the "Details" button in the "OpenTelemetry" box. Next,
+copy your Grafana OTLP Endpoint and Instance ID, as in the image below.
 
-![](https://grafana.com/media/docs/grafana-cloud/beyla/tutorial/grafana-cloud-instance-id.png)
+![](https://grafana.com/media/docs/grafana-cloud/beyla/tutorial/otlp-connection-details.png)
 
-Also create a Grafana API Key with metrics push privileges.
+Also generate a Password/API token with metrics push privileges.
 
 Now you can run Beyla by using the above information to set the
-`GRAFANA_CLOUD_ZONE`, `GRAFANA_CLOUD_INSTANCE_ID` and `GRAFANA_CLOUD_API_KEY`
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `GRAFANA_CLOUD_INSTANCE_ID` and `GRAFANA_CLOUD_API_KEY`
 environment variables.
 
 The `GRAFANA_CLOUD_SUBMIT` environment variable (whose value defaults to `traces`)
@@ -201,8 +201,8 @@ we will set `GRAFANA_CLOUD_SUBMIT=metrics`.
 For example:
 
 ```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-prod-eu-west-0.grafana.net/otlp
 export GRAFANA_CLOUD_SUBMIT=metrics
-export GRAFANA_CLOUD_ZONE=prod-eu-west-0
 export GRAFANA_CLOUD_INSTANCE_ID=123456
 export GRAFANA_CLOUD_API_KEY="your api key here..."
 
