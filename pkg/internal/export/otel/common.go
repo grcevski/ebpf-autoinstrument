@@ -94,6 +94,12 @@ func NewReporterPool[T any](
 	return ReporterPool[T]{pool: pool, itemConstructor: itemConstructor}
 }
 
+// Purge will delete all te entries in the reporter pool. It will also invoke the eviction
+// callback for each of them
+func (rp *ReporterPool[T]) Purge() {
+	rp.pool.Purge()
+}
+
 // For retrieves the associated item for the given service name, or
 // creates a new one if it does not exist
 func (rp *ReporterPool[T]) For(service svc.ID) (T, error) {

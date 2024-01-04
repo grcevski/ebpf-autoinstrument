@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -154,7 +153,11 @@ func newMetricsReporter(ctx context.Context, cfg *MetricsConfig, ctxInfo *global
 		func(id svc.ID, v *Metrics) {
 			llog := log.With("service", id)
 			llog.Debug("evicting metrics reporter from cache")
-			// a finalizer shuts down the metrics provider
+			go func() {
+				if err := v.provider.Shutdown(ctx); err != nil {
+					log.Warn("error shutting down metrics provider", "error", err)
+				}
+			}()
 		}, mr.newMetricSet)
 	// Instantiate the OTLP HTTP or GRPC metrics exporter
 	exporter, err := instantiateMetricsExporter(ctx, cfg, log)
@@ -164,16 +167,6 @@ func newMetricsReporter(ctx context.Context, cfg *MetricsConfig, ctxInfo *global
 	mr.exporter = instrumentMetricsExporter(ctxInfo.Metrics, exporter)
 
 	return &mr, nil
-}
-
-func (r *Metrics) release() error {
-	go func() {
-		if err := r.provider.Shutdown(r.ctx); err != nil {
-			mlog().Warn("error shutting down metrics provider", "error", err)
-		}
-	}()
-	runtime.SetFinalizer(r, nil)
-	return nil
 }
 
 func (mr *MetricsReporter) newMetricSet(service svc.ID) (*Metrics, error) {
@@ -194,7 +187,6 @@ func (mr *MetricsReporter) newMetricSet(service svc.ID) (*Metrics, error) {
 			metric.WithView(otelHistogramBuckets(HTTPClientRequestSize, mr.cfg.Buckets.RequestSizeHistogram)),
 		),
 	}
-	runtime.SetFinalizer(&m, (*Metrics).release)
 	// time units for HTTP and GRPC durations are in seconds, according to the OTEL specification:
 	// https://github.com/open-telemetry/opentelemetry-specification/tree/main/specification/metrics/semantic_conventions
 	// TODO: set ExplicitBucketBoundaries here and in prometheus from the previous specification
@@ -277,6 +269,7 @@ func grpcMetricsExporter(ctx context.Context, cfg *MetricsConfig) (metric.Export
 }
 
 func (mr *MetricsReporter) close() {
+	mr.reporters.Purge()
 	if err := mr.exporter.Shutdown(mr.ctx); err != nil {
 		slog.With("component", "MetricsReporter").Error("closing metrics provider", err)
 	}
@@ -407,6 +400,7 @@ func (r *Metrics) record(span *request.Span, attrs attribute.Set) {
 }
 
 func (mr *MetricsReporter) reportMetrics(input <-chan []request.Span) {
+	log := mlog()
 	var lastSvc svc.ID
 	var reporter *Metrics
 	for spans := range input {
@@ -428,7 +422,7 @@ func (mr *MetricsReporter) reportMetrics(input <-chan []request.Span) {
 			if s.ServiceID != lastSvc || reporter == nil {
 				lm, err := mr.reporters.For(s.ServiceID)
 				if err != nil {
-					mlog().Error("unexpected error creating OTEL resource. Ignoring metric",
+					log.Error("unexpected error creating OTEL resource. Ignoring metric",
 						err, "service", s.ServiceID)
 					continue
 				}
@@ -438,7 +432,9 @@ func (mr *MetricsReporter) reportMetrics(input <-chan []request.Span) {
 			reporter.record(s, mr.metricAttributes(s))
 		}
 	}
+	log.Debug("closing all the OTEL exporters before finishing the node")
 	mr.close()
+	log.Debug("exiting reportMetrics")
 }
 
 func getHTTPMetricEndpointOptions(cfg *MetricsConfig) (otlpOptions, error) {
