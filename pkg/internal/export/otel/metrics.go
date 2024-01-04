@@ -110,6 +110,7 @@ func (m MetricsConfig) Enabled() bool {
 // MetricsReporter implements the graph node that receives request.Span
 // instances and forwards them as OTEL metrics.
 type MetricsReporter struct {
+	closed    bool
 	ctx       context.Context
 	cfg       *MetricsConfig
 	exporter  metric.Exporter
@@ -149,16 +150,7 @@ func newMetricsReporter(ctx context.Context, cfg *MetricsConfig, ctxInfo *global
 		ctx: ctx,
 		cfg: cfg,
 	}
-	mr.reporters = NewReporterPool[*Metrics](cfg.ReportersCacheLen,
-		func(id svc.ID, v *Metrics) {
-			llog := log.With("service", id)
-			llog.Debug("evicting metrics reporter from cache")
-			go func() {
-				if err := v.provider.Shutdown(ctx); err != nil {
-					log.Warn("error shutting down metrics provider", "error", err)
-				}
-			}()
-		}, mr.newMetricSet)
+	mr.reporters = NewReporterPool[*Metrics](cfg.ReportersCacheLen, mr.evictMetrics, mr.newMetricSet)
 	// Instantiate the OTLP HTTP or GRPC metrics exporter
 	exporter, err := instantiateMetricsExporter(ctx, cfg, log)
 	if err != nil {
@@ -223,6 +215,30 @@ func (mr *MetricsReporter) newMetricSet(service svc.ID) (*Metrics, error) {
 	return &m, nil
 }
 
+// evictTracer invokes the eviction callback for the cached Metrics. When the MetricsReporter
+// is running, the eviction callback is invoked asynchronously to avoid that any delay in the
+// remote flush affects the metrics processing.
+// When the MetricsReporter is closed, the eviction callback is evicted synchronously to make
+// sure that all the metrics are flushed before closing the exporters.
+func (mr *MetricsReporter) evictMetrics(id svc.ID, v *Metrics) {
+	llog := mlog().With("service", id)
+	llog.Debug("evicting metrics reporter from cache")
+	if mr.closed {
+		mr.closeProvider(llog, v.provider)
+	} else {
+		go mr.closeProvider(llog, v.provider)
+	}
+}
+
+func (mr *MetricsReporter) closeProvider(log *slog.Logger, tp *metric.MeterProvider) {
+	if err := tp.ForceFlush(mr.ctx); err != nil {
+		log.Warn("error flushing meter provider", "error", err)
+	}
+	if err := tp.Shutdown(mr.ctx); err != nil {
+		log.Warn("error shutting down meter provider", "error", err)
+	}
+}
+
 func instantiateMetricsExporter(ctx context.Context, cfg *MetricsConfig, log *slog.Logger) (metric.Exporter, error) {
 	var err error
 	var exporter metric.Exporter
@@ -269,6 +285,7 @@ func grpcMetricsExporter(ctx context.Context, cfg *MetricsConfig) (metric.Export
 }
 
 func (mr *MetricsReporter) close() {
+	mr.closed = true
 	mr.reporters.Purge()
 	if err := mr.exporter.Shutdown(mr.ctx); err != nil {
 		slog.With("component", "MetricsReporter").Error("closing metrics provider", err)

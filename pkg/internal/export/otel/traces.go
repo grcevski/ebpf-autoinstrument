@@ -107,6 +107,7 @@ func (m *TracesConfig) GuessProtocol() Protocol {
 // TracesReporter implement the graph node that receives request.Span
 // instances and forwards them as OTEL traces.
 type TracesReporter struct {
+	closed        bool
 	ctx           context.Context
 	cfg           *TracesConfig
 	traceExporter trace.SpanExporter
@@ -136,16 +137,7 @@ func ReportTraces(ctx context.Context, cfg *TracesConfig, ctxInfo *global.Contex
 func newTracesReporter(ctx context.Context, cfg *TracesConfig, ctxInfo *global.ContextInfo) (*TracesReporter, error) {
 	log := tlog()
 	r := TracesReporter{ctx: ctx, cfg: cfg}
-	r.reporters = NewReporterPool[*Tracers](cfg.ReportersCacheLen,
-		func(k svc.ID, v *Tracers) {
-			llog := log.With("service", k)
-			llog.Debug("evicting metrics reporter from cache")
-			go func() {
-				if err := v.provider.Shutdown(ctx); err != nil {
-					log.Warn("error shutting down metrics provider", "error", err)
-				}
-			}()
-		}, r.newTracers)
+	r.reporters = NewReporterPool[*Tracers](cfg.ReportersCacheLen, r.evictTracer, r.newTracers)
 	// Instantiate the OTLP HTTP or GRPC traceExporter
 	var err error
 	var exporter trace.SpanExporter
@@ -183,6 +175,30 @@ func newTracesReporter(ctx context.Context, cfg *TracesConfig, ctxInfo *global.C
 
 	r.bsp = trace.NewBatchSpanProcessor(r.traceExporter, opts...)
 	return &r, nil
+}
+
+// evictTracer invokes the eviction callback for the cached tracers. When the TracesReporter
+// is running, the eviction callback is invoked asynchronously to avoid that any delay in the
+// remote flush affects to the traces processing.
+// When the TracesReporter is closed, the eviction callback is evicted synchronously to make
+// sure that all the traces are flushed before closing the exporters.
+func (r *TracesReporter) evictTracer(k svc.ID, v *Tracers) {
+	llog := tlog().With("service", k)
+	llog.Debug("evicting traces reporter from cache")
+	if r.closed {
+		r.closeProvider(llog, v.provider)
+	} else {
+		go r.closeProvider(llog, v.provider)
+	}
+}
+
+func (r *TracesReporter) closeProvider(log *slog.Logger, tp *trace.TracerProvider) {
+	if err := tp.ForceFlush(r.ctx); err != nil {
+		log.Warn("error flushing traces provider", "error", err)
+	}
+	if err := tp.Shutdown(r.ctx); err != nil {
+		log.Warn("error shutting down traces provider", "error", err)
+	}
 }
 
 func httpTracer(ctx context.Context, cfg *TracesConfig) (*otlptrace.Exporter, error) {
@@ -224,6 +240,7 @@ func instrumentTraceExporter(in trace.SpanExporter, internalMetrics imetrics.Rep
 }
 
 func (r *TracesReporter) close() {
+	r.closed = true
 	r.reporters.Purge()
 	if err := r.traceExporter.Shutdown(r.ctx); err != nil {
 		tlog().Error("closing traces exporter", err)

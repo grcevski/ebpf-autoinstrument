@@ -584,13 +584,12 @@ func TestTracerPipelineInfo(t *testing.T) {
 	require.NoError(t, err)
 
 	gb := newGraphBuilder(ctx, &Config{
-		Traces: otel.TracesConfig{TracesEndpoint: tc.ServerEndpoint, ReportersCacheLen: 16, BatchTimeout: 1 * time.Millisecond},
+		Traces: otel.TracesConfig{TracesEndpoint: tc.ServerEndpoint, ReportersCacheLen: 16},
 	}, gctx(), make(<-chan []request.Span))
 	// Override eBPF tracer to send some fake data
 	graph.RegisterStart(gb.builder, func(_ traces.ReadDecorator) (node.StartFunc[[]request.Span], error) {
 		return func(out chan<- []request.Span) {
 			out <- newHTTPInfo("PATCH", "/aaa/bbb", "1.1.1.1", 204)
-			<-ctx.Done()
 		}, nil
 	})
 	pipe, err := gb.buildGraph()
