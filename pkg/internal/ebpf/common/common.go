@@ -46,7 +46,7 @@ type TracerConfig struct {
 	BatchTimeout time.Duration `yaml:"batch_timeout" env:"BEYLA_BPF_BATCH_TIMEOUT"`
 
 	// BpfBaseDir specifies the base directory where the BPF pinned maps will be mounted.
-	// By default, it will be /var/run/beyla
+	// By default, it will be /sys/fs/bpf/beyla
 	BpfBaseDir string `yaml:"bpf_fs_base_dir" env:"BEYLA_BPF_FS_BASE_DIR"`
 
 	// If enabled, the kprobes based HTTP request tracking will start tracking the request

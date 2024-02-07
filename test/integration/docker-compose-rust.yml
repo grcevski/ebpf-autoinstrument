@@ -29,6 +29,7 @@ services:
     pid: "service:testserver"
     environment:
       GOCOVERDIR: "/coverage"
+      BEYLA_BPF_FS_BASE_DIR: "/var/run/beyla"
       BEYLA_PRINT_TRACES: "true"
       BEYLA_OPEN_PORT: "${BEYLA_OPEN_PORT}"
       BEYLA_DISCOVERY_POLL_INTERVAL: 500ms

@@ -17,6 +17,7 @@ services:
       BEYLA_PRINT_TRACES: "true"
       BEYLA_OPEN_PORT: {{ .ApplicationPort }}
       BEYLA_SERVICE_NAMESPACE: "integration-test"
+      BEYLA_BPF_FS_BASE_DIR: "/var/run/beyla"
       BEYLA_METRICS_INTERVAL: "10ms"
       BEYLA_BPF_BATCH_TIMEOUT: "10ms"
       BEYLA_LOG_LEVEL: "DEBUG"
