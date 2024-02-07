@@ -12,7 +12,7 @@
 #ifndef GO_GRPC_H
 #define GO_GRPC_H
 
-#include "pid.h"
+#include "pid_helpers.h"
 #include "utils.h"
 #include "go_str.h"
 #include "go_byte_arr.h"

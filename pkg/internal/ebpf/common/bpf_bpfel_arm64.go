@@ -13,22 +13,6 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-type bpfConnectionInfoT struct {
-	S_addr [16]uint8
-	D_addr [16]uint8
-	S_port uint16
-	D_port uint16
-}
-
-type bpfHttpConnectionMetadataT struct {
-	Pid struct {
-		HostPid   uint32
-		UserPid   uint32
-		Namespace uint32
-	}
-	Type uint8
-}
-
 type bpfHttpRequestTrace struct {
 	Type              uint8
 	GoStartMonotimeNs uint64
@@ -58,16 +42,6 @@ type bpfHttpRequestTrace struct {
 	}
 }
 
-type bpfPidConnectionInfoT struct {
-	Conn bpfConnectionInfoT
-	Pid  uint32
-}
-
-type bpfPidKeyT struct {
-	Pid       uint32
-	Namespace uint32
-}
-
 type bpfSqlRequestTrace struct {
 	Type            uint8
 	StartMonotimeNs uint64
@@ -87,20 +61,6 @@ type bpfSqlRequestTrace struct {
 		UserPid   uint32
 		Namespace uint32
 	}
-}
-
-type bpfTpInfoPidT struct {
-	Tp struct {
-		TraceId  [16]uint8
-		SpanId   [8]uint8
-		ParentId [8]uint8
-		Ts       uint64
-		Flags    uint8
-		_        [7]byte
-	}
-	Pid   uint32
-	Valid uint8
-	_     [3]byte
 }
 
 // loadBpf returns the embedded CollectionSpec for bpf.
@@ -150,10 +110,6 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	FilteredConnections *ebpf.MapSpec `ebpf:"filtered_connections"`
-	PidCache            *ebpf.MapSpec `ebpf:"pid_cache"`
-	TraceMap            *ebpf.MapSpec `ebpf:"trace_map"`
-	ValidPids           *ebpf.MapSpec `ebpf:"valid_pids"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -175,19 +131,10 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	FilteredConnections *ebpf.Map `ebpf:"filtered_connections"`
-	PidCache            *ebpf.Map `ebpf:"pid_cache"`
-	TraceMap            *ebpf.Map `ebpf:"trace_map"`
-	ValidPids           *ebpf.Map `ebpf:"valid_pids"`
 }
 
 func (m *bpfMaps) Close() error {
-	return _BpfClose(
-		m.FilteredConnections,
-		m.PidCache,
-		m.TraceMap,
-		m.ValidPids,
-	)
+	return _BpfClose()
 }
 
 // bpfPrograms contains all programs after they have been loaded into the kernel.

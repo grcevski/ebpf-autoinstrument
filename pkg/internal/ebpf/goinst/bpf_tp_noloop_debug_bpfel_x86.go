@@ -45,15 +45,6 @@ type bpf_tp_noloop_debugGrpcSrvFuncInvocationT struct {
 	Tp              bpf_tp_noloop_debugTpInfoT
 }
 
-type bpf_tp_noloop_debugHttpConnectionMetadataT struct {
-	Pid struct {
-		HostPid   uint32
-		UserPid   uint32
-		Namespace uint32
-	}
-	Type uint8
-}
-
 type bpf_tp_noloop_debugHttpFuncInvocationT struct {
 	StartMonotimeNs uint64
 	ReqPtr          uint64
@@ -62,28 +53,11 @@ type bpf_tp_noloop_debugHttpFuncInvocationT struct {
 
 type bpf_tp_noloop_debugNewFuncInvocationT struct{ Parent uint64 }
 
-type bpf_tp_noloop_debugPidConnectionInfoT struct {
-	Conn bpf_tp_noloop_debugConnectionInfoT
-	Pid  uint32
-}
-
-type bpf_tp_noloop_debugPidKeyT struct {
-	Pid       uint32
-	Namespace uint32
-}
-
 type bpf_tp_noloop_debugSqlFuncInvocationT struct {
 	StartMonotimeNs uint64
 	SqlParam        uint64
 	QueryLen        uint64
 	Tp              bpf_tp_noloop_debugTpInfoT
-}
-
-type bpf_tp_noloop_debugTpInfoPidT struct {
-	Tp    bpf_tp_noloop_debugTpInfoT
-	Pid   uint32
-	Valid uint8
-	_     [3]byte
 }
 
 type bpf_tp_noloop_debugTpInfoT struct {
@@ -170,7 +144,6 @@ type bpf_tp_noloop_debugProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_tp_noloop_debugMapSpecs struct {
 	Events                       *ebpf.MapSpec `ebpf:"events"`
-	FilteredConnections          *ebpf.MapSpec `ebpf:"filtered_connections"`
 	FramerInvocationMap          *ebpf.MapSpec `ebpf:"framer_invocation_map"`
 	GoTraceMap                   *ebpf.MapSpec `ebpf:"go_trace_map"`
 	GolangMapbucketStorageMap    *ebpf.MapSpec `ebpf:"golang_mapbucket_storage_map"`
@@ -187,9 +160,6 @@ type bpf_tp_noloop_debugMapSpecs struct {
 	OngoingHttpServerRequests    *ebpf.MapSpec `ebpf:"ongoing_http_server_requests"`
 	OngoingSqlQueries            *ebpf.MapSpec `ebpf:"ongoing_sql_queries"`
 	OngoingStreams               *ebpf.MapSpec `ebpf:"ongoing_streams"`
-	PidCache                     *ebpf.MapSpec `ebpf:"pid_cache"`
-	TraceMap                     *ebpf.MapSpec `ebpf:"trace_map"`
-	ValidPids                    *ebpf.MapSpec `ebpf:"valid_pids"`
 }
 
 // bpf_tp_noloop_debugObjects contains all objects after they have been loaded into the kernel.
@@ -212,7 +182,6 @@ func (o *bpf_tp_noloop_debugObjects) Close() error {
 // It can be passed to loadBpf_tp_noloop_debugObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_tp_noloop_debugMaps struct {
 	Events                       *ebpf.Map `ebpf:"events"`
-	FilteredConnections          *ebpf.Map `ebpf:"filtered_connections"`
 	FramerInvocationMap          *ebpf.Map `ebpf:"framer_invocation_map"`
 	GoTraceMap                   *ebpf.Map `ebpf:"go_trace_map"`
 	GolangMapbucketStorageMap    *ebpf.Map `ebpf:"golang_mapbucket_storage_map"`
@@ -229,15 +198,11 @@ type bpf_tp_noloop_debugMaps struct {
 	OngoingHttpServerRequests    *ebpf.Map `ebpf:"ongoing_http_server_requests"`
 	OngoingSqlQueries            *ebpf.Map `ebpf:"ongoing_sql_queries"`
 	OngoingStreams               *ebpf.Map `ebpf:"ongoing_streams"`
-	PidCache                     *ebpf.Map `ebpf:"pid_cache"`
-	TraceMap                     *ebpf.Map `ebpf:"trace_map"`
-	ValidPids                    *ebpf.Map `ebpf:"valid_pids"`
 }
 
 func (m *bpf_tp_noloop_debugMaps) Close() error {
 	return _Bpf_tp_noloop_debugClose(
 		m.Events,
-		m.FilteredConnections,
 		m.FramerInvocationMap,
 		m.GoTraceMap,
 		m.GolangMapbucketStorageMap,
@@ -254,9 +219,6 @@ func (m *bpf_tp_noloop_debugMaps) Close() error {
 		m.OngoingHttpServerRequests,
 		m.OngoingSqlQueries,
 		m.OngoingStreams,
-		m.PidCache,
-		m.TraceMap,
-		m.ValidPids,
 	)
 }
 

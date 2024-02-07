@@ -17,6 +17,17 @@
 
 volatile const s32 capture_header_buffer = 0;
 
+// Keeps track of active accept or connect connection infos
+// From this table we extract the PID of the process and filter
+// HTTP calls we are not interested in
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __type(key, pid_connection_info_t);
+    __type(value, http_connection_metadata_t); // PID_TID group and connection type
+    __uint(max_entries, MAX_CONCURRENT_SHARED_REQUESTS);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} filtered_connections SEC(".maps");
+
 // Keeps track of the ongoing http connections we match for request/response
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);

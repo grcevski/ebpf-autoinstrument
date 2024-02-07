@@ -3,7 +3,6 @@
 
 #include "vmlinux.h"
 #include "bpf_helpers.h"
-#include "tracing.h"
 
 uint32_t huffman_codes[256] = {
     0x1ff8,

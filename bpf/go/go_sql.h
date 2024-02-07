@@ -18,7 +18,7 @@
 #ifndef GO_SQL_H
 #define GO_SQL_H
 
-#include "pid.h"
+#include "pid_helpers.h"
 #include "vmlinux.h"
 #include "bpf_helpers.h"
 #include "bpf_builtins.h"

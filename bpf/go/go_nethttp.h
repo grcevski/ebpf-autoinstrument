@@ -13,7 +13,7 @@
 #ifndef GO_NETHTTP_H
 #define GO_NETHTTP_H
 
-#include "pid.h"
+#include "pid_helpers.h"
 #include "utils.h"
 #include "go_str.h"
 #include "go_byte_arr.h"

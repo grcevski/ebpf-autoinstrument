@@ -36,12 +36,11 @@ func (ta *TraceAttacher) mountBpfPinPath() error {
 }
 
 func (ta *TraceAttacher) unmountBpfPinPath() {
-	if strings.HasPrefix(ta.pinPath, beyla.DefaultBPFMountPath) {
-		return
-	}
-	if err := unix.Unmount(ta.pinPath, unix.MNT_FORCE); err != nil {
-		ta.log.Warn("can't unmount pinned root. Try unmounting and removing it manually", err)
-		return
+	if !strings.HasPrefix(ta.pinPath, beyla.DefaultBPFMountPath) {
+		if err := unix.Unmount(ta.pinPath, unix.MNT_FORCE); err != nil {
+			ta.log.Warn("can't unmount pinned root. Try unmounting and removing it manually", err)
+			return
+		}
 	}
 	ta.log.Debug("unmounted bpf file system")
 	if err := os.RemoveAll(ta.pinPath); err != nil {

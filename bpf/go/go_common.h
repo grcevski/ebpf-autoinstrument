@@ -18,7 +18,6 @@
 #include "bpf_dbg.h"
 #include "http_trace.h"
 #include "ringbuf.h"
-#include "tracing.h"
 #include "trace_util.h"
 #include "go_traceparent.h"
 
@@ -125,7 +124,7 @@ static __always_inline void server_trace_parent(void *goroutine_addr, tp_info_t 
             decode_go_traceparent(buf, tp->trace_id, tp->parent_id, &tp->flags);
         }
     } else {
-        connection_info_t *info = bpf_map_lookup_elem(&ongoing_http_server_connections, &goroutine_addr);
+/*        connection_info_t *info = bpf_map_lookup_elem(&ongoing_http_server_connections, &goroutine_addr);
         u8 found_info = 0;
 
         if (info) {
@@ -139,12 +138,12 @@ static __always_inline void server_trace_parent(void *goroutine_addr, tp_info_t 
                 }
             }
         }
-
-        if (!found_info) {
+*/
+//        if (!found_info) {
             bpf_dbg_printk("No traceparent in headers, generating");
             urand_bytes(tp->trace_id, TRACE_ID_SIZE_BYTES);
             *((u64 *)tp->parent_id) = 0;
-        }
+//        }
     }
 
     urand_bytes(tp->span_id, SPAN_ID_SIZE_BYTES);

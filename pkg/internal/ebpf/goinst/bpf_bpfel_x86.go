@@ -40,15 +40,6 @@ type bpfGrpcSrvFuncInvocationT struct {
 	Tp              bpfTpInfoT
 }
 
-type bpfHttpConnectionMetadataT struct {
-	Pid struct {
-		HostPid   uint32
-		UserPid   uint32
-		Namespace uint32
-	}
-	Type uint8
-}
-
 type bpfHttpFuncInvocationT struct {
 	StartMonotimeNs uint64
 	ReqPtr          uint64
@@ -57,28 +48,11 @@ type bpfHttpFuncInvocationT struct {
 
 type bpfNewFuncInvocationT struct{ Parent uint64 }
 
-type bpfPidConnectionInfoT struct {
-	Conn bpfConnectionInfoT
-	Pid  uint32
-}
-
-type bpfPidKeyT struct {
-	Pid       uint32
-	Namespace uint32
-}
-
 type bpfSqlFuncInvocationT struct {
 	StartMonotimeNs uint64
 	SqlParam        uint64
 	QueryLen        uint64
 	Tp              bpfTpInfoT
-}
-
-type bpfTpInfoPidT struct {
-	Tp    bpfTpInfoT
-	Pid   uint32
-	Valid uint8
-	_     [3]byte
 }
 
 type bpfTpInfoT struct {
@@ -165,7 +139,6 @@ type bpfProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
 	Events                       *ebpf.MapSpec `ebpf:"events"`
-	FilteredConnections          *ebpf.MapSpec `ebpf:"filtered_connections"`
 	GoTraceMap                   *ebpf.MapSpec `ebpf:"go_trace_map"`
 	GolangMapbucketStorageMap    *ebpf.MapSpec `ebpf:"golang_mapbucket_storage_map"`
 	Newproc1                     *ebpf.MapSpec `ebpf:"newproc1"`
@@ -179,9 +152,6 @@ type bpfMapSpecs struct {
 	OngoingHttpServerRequests    *ebpf.MapSpec `ebpf:"ongoing_http_server_requests"`
 	OngoingSqlQueries            *ebpf.MapSpec `ebpf:"ongoing_sql_queries"`
 	OngoingStreams               *ebpf.MapSpec `ebpf:"ongoing_streams"`
-	PidCache                     *ebpf.MapSpec `ebpf:"pid_cache"`
-	TraceMap                     *ebpf.MapSpec `ebpf:"trace_map"`
-	ValidPids                    *ebpf.MapSpec `ebpf:"valid_pids"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -204,7 +174,6 @@ func (o *bpfObjects) Close() error {
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
 	Events                       *ebpf.Map `ebpf:"events"`
-	FilteredConnections          *ebpf.Map `ebpf:"filtered_connections"`
 	GoTraceMap                   *ebpf.Map `ebpf:"go_trace_map"`
 	GolangMapbucketStorageMap    *ebpf.Map `ebpf:"golang_mapbucket_storage_map"`
 	Newproc1                     *ebpf.Map `ebpf:"newproc1"`
@@ -218,15 +187,11 @@ type bpfMaps struct {
 	OngoingHttpServerRequests    *ebpf.Map `ebpf:"ongoing_http_server_requests"`
 	OngoingSqlQueries            *ebpf.Map `ebpf:"ongoing_sql_queries"`
 	OngoingStreams               *ebpf.Map `ebpf:"ongoing_streams"`
-	PidCache                     *ebpf.Map `ebpf:"pid_cache"`
-	TraceMap                     *ebpf.Map `ebpf:"trace_map"`
-	ValidPids                    *ebpf.Map `ebpf:"valid_pids"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
 		m.Events,
-		m.FilteredConnections,
 		m.GoTraceMap,
 		m.GolangMapbucketStorageMap,
 		m.Newproc1,
@@ -240,9 +205,6 @@ func (m *bpfMaps) Close() error {
 		m.OngoingHttpServerRequests,
 		m.OngoingSqlQueries,
 		m.OngoingStreams,
-		m.PidCache,
-		m.TraceMap,
-		m.ValidPids,
 	)
 }
 

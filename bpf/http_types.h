@@ -5,21 +5,13 @@
 #include "map_sizing.h"
 #include "bpf_helpers.h"
 #include "http_defs.h"
-#include "pid.h"
+#include "trace_util.h"
+#include "pid_helpers.h"
 
 #define FULL_BUF_SIZE 160 // should be enough for most URLs, we may need to extend it if not. Must be multiple of 16 for the copy to work.
 #define TRACE_BUF_SIZE 1024 // must be power of 2, we do an & to limit the buffer size
 
 #define CONN_INFO_FLAG_TRACE 0x1
-
-#define TRACE_ID_SIZE_BYTES 16
-#define SPAN_ID_SIZE_BYTES   8
-#define FLAGS_SIZE_BYTES     1
-#define TRACE_ID_CHAR_LEN   32
-#define SPAN_ID_CHAR_LEN    16
-#define FLAGS_CHAR_LEN       2
-#define TP_MAX_VAL_LENGTH   55
-#define TP_MAX_KEY_LENGTH   11
 
 // Struct to keep information on the connections in flight 
 // s = source, d = destination
@@ -36,14 +28,6 @@ typedef struct http_pid_connection_info {
     connection_info_t conn;
     u32 pid;
 } pid_connection_info_t;
-
-typedef struct tp_info {
-    unsigned char trace_id[TRACE_ID_SIZE_BYTES];
-    unsigned char span_id[SPAN_ID_SIZE_BYTES];
-    unsigned char parent_id[SPAN_ID_SIZE_BYTES];
-    u64 ts;
-    u8  flags;
-} tp_info_t;
 
 typedef struct tp_info_pid {
     tp_info_t tp;
@@ -88,18 +72,6 @@ typedef struct http_buf {
     connection_info_t conn_info;
     u8  buf[TRACE_BUF_SIZE];
 } http_buf_t;
-
-// Keeps track of active accept or connect connection infos
-// From this table we extract the PID of the process and filter
-// HTTP calls we are not interested in
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __type(key, pid_connection_info_t);
-    __type(value, http_connection_metadata_t); // PID_TID group and connection type
-    __uint(max_entries, MAX_CONCURRENT_SHARED_REQUESTS);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
-} filtered_connections SEC(".maps");
-
 
 // Force emitting struct http_request_trace into the ELF for automatic creation of Golang struct
 const http_info_t *unused __attribute__((unused));

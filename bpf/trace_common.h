@@ -5,7 +5,7 @@
 #include "http_types.h"
 #include "trace_util.h"
 #include "tracing.h"
-#include "pid.h"
+#include "pid_helpers.h"
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
