@@ -107,6 +107,7 @@ type bpf_debugSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_debugProgramSpecs struct {
+	HttpServeHTTP_start                       *ebpf.ProgramSpec `ebpf:"http_ServeHTTP_start"`
 	UprobeServeHTTP                           *ebpf.ProgramSpec `ebpf:"uprobe_ServeHTTP"`
 	UprobeWriteHeader                         *ebpf.ProgramSpec `ebpf:"uprobe_WriteHeader"`
 	UprobeConnServe                           *ebpf.ProgramSpec `ebpf:"uprobe_connServe"`
@@ -191,6 +192,7 @@ func (m *bpf_debugMaps) Close() error {
 //
 // It can be passed to loadBpf_debugObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_debugPrograms struct {
+	HttpServeHTTP_start                       *ebpf.Program `ebpf:"http_ServeHTTP_start"`
 	UprobeServeHTTP                           *ebpf.Program `ebpf:"uprobe_ServeHTTP"`
 	UprobeWriteHeader                         *ebpf.Program `ebpf:"uprobe_WriteHeader"`
 	UprobeConnServe                           *ebpf.Program `ebpf:"uprobe_connServe"`
@@ -208,6 +210,7 @@ type bpf_debugPrograms struct {
 
 func (p *bpf_debugPrograms) Close() error {
 	return _Bpf_debugClose(
+		p.HttpServeHTTP_start,
 		p.UprobeServeHTTP,
 		p.UprobeWriteHeader,
 		p.UprobeConnServe,

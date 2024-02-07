@@ -112,6 +112,7 @@ type bpf_tpSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_tpProgramSpecs struct {
+	HttpServeHTTP_start                       *ebpf.ProgramSpec `ebpf:"http_ServeHTTP_start"`
 	UprobeServeHTTP                           *ebpf.ProgramSpec `ebpf:"uprobe_ServeHTTP"`
 	UprobeWriteHeader                         *ebpf.ProgramSpec `ebpf:"uprobe_WriteHeader"`
 	UprobeConnServe                           *ebpf.ProgramSpec `ebpf:"uprobe_connServe"`
@@ -205,6 +206,7 @@ func (m *bpf_tpMaps) Close() error {
 //
 // It can be passed to loadBpf_tpObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_tpPrograms struct {
+	HttpServeHTTP_start                       *ebpf.Program `ebpf:"http_ServeHTTP_start"`
 	UprobeServeHTTP                           *ebpf.Program `ebpf:"uprobe_ServeHTTP"`
 	UprobeWriteHeader                         *ebpf.Program `ebpf:"uprobe_WriteHeader"`
 	UprobeConnServe                           *ebpf.Program `ebpf:"uprobe_connServe"`
@@ -222,6 +224,7 @@ type bpf_tpPrograms struct {
 
 func (p *bpf_tpPrograms) Close() error {
 	return _Bpf_tpClose(
+		p.HttpServeHTTP_start,
 		p.UprobeServeHTTP,
 		p.UprobeWriteHeader,
 		p.UprobeConnServe,

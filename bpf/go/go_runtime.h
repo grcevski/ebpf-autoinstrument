@@ -75,7 +75,7 @@ static __always_inline int runtime_proc_newproc1_end(struct pt_regs *ctx) {
     return 0;
 }
 
-static __always_inline int runtime_proc_goexit1_start(struct pt_regs *ctx) {
+static __always_inline void runtime_proc_goexit1_start(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc goexit1 === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);

@@ -13,7 +13,7 @@ int uprobe_server_handleStream_return(struct pt_regs *ctx) {
 
 SEC("uprobe/transport_writeStatus")
 int uprobe_transport_writeStatus(struct pt_regs *ctx) {
-    grpc_server_handleStream_start(ctx);
+    grpc_transport_writeStatus_start(ctx);
     return 0;
 }
 

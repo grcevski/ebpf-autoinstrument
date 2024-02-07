@@ -27,8 +27,8 @@ import (
 	"github.com/grafana/beyla/pkg/internal/svc"
 )
 
-//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -target amd64,arm64 bpf ../../../../bpf/go_runtime.c -- -I../../../../bpf/headers
-//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -target amd64,arm64 bpf_debug ../../../../bpf/go_runtime.c -- -I../../../../bpf/headers -DBPF_DEBUG
+//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -target amd64,arm64 bpf ../../../../bpf/go_runtime.c -- -I../../../../bpf/headers -I../../../../bpf -I../../../../bpf/go
+//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -target amd64,arm64 bpf_debug ../../../../bpf/go_runtime.c -- -I../../../../bpf/headers -I../../../../bpf -I../../../../bpf/go -DBPF_DEBUG
 
 type Tracer struct {
 	log        *slog.Logger
