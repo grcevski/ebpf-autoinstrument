@@ -154,6 +154,14 @@ func (p *Tracer) Load() (*ebpf.CollectionSpec, error) {
 	return loader()
 }
 
+func (p *Tracer) Optional() bool {
+	return false
+}
+
+func (p *Tracer) UsesPinnedMaps() bool {
+	return true
+}
+
 func (p *Tracer) Constants(_ *exec.FileInfo, _ *goexec.Offsets) map[string]any {
 	m := make(map[string]any, 2)
 

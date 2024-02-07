@@ -387,7 +387,7 @@ static __always_inline int grpc_ClientConn_Invoke_end(struct pt_regs *ctx) {
 }
 
 /* All of the code below is related to injecting "traceparent" in the outgoing gRPC request headers */
-#ifndef NO_HEADER_PROPAGATION
+#if !defined(NO_HEADER_PROPAGATION) && !defined(PRE_LOOP)
 static __always_inline void grpc_transport_http2Client_NewStream_start(struct pt_regs *ctx) {
     bpf_dbg_printk("=== grpc uprobe/proc transport.(*http2Client).NewStream === ");
 
@@ -565,6 +565,6 @@ static __always_inline int grpc_hpack_Encoder_WriteField_start(struct pt_regs *c
     return 0;
 }
 
-#endif // NO_HEADER_PROPAGATION
+#endif // !NO_HEADER_PROPAGATION && !PRE_LOOP
 
 #endif // GO_GRPC_H

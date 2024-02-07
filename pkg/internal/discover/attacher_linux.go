@@ -3,13 +3,17 @@ package discover
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/grafana/beyla/pkg/beyla"
 	"golang.org/x/sys/unix"
 )
 
 func (ta *TraceAttacher) close() {
-	ta.unmountBpfPinPath()
+	if ta.bpfMounted {
+		ta.unmountBpfPinPath()
+	}
 }
 
 func (ta *TraceAttacher) mountBpfPinPath() error {
@@ -24,10 +28,17 @@ func (ta *TraceAttacher) mountBpfPinPath() error {
 		}
 	}
 
+	if strings.HasPrefix(ta.pinPath, beyla.DefaultBPFMountPath) {
+		return nil
+	}
+
 	return bpfMount(ta.pinPath)
 }
 
 func (ta *TraceAttacher) unmountBpfPinPath() {
+	if strings.HasPrefix(ta.pinPath, beyla.DefaultBPFMountPath) {
+		return
+	}
 	if err := unix.Unmount(ta.pinPath, unix.MNT_FORCE); err != nil {
 		ta.log.Warn("can't unmount pinned root. Try unmounting and removing it manually", err)
 		return
@@ -48,6 +59,10 @@ func (ta *TraceAttacher) init() error {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return fmt.Errorf("removing memory lock: %w", err)
 	}
+	return nil
+}
+
+func (ta *TraceAttacher) initBpfFS() error {
 	if err := ta.mountBpfPinPath(); err != nil {
 		return fmt.Errorf("can't mount BPF filesystem: %w", err)
 	}

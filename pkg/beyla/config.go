@@ -19,14 +19,16 @@ import (
 )
 
 const ReporterLRUSize = 256
+const DefaultBPFMountPath = "/sys/fs/bpf"
 
 var defaultConfig = Config{
 	ChannelBufferLen: 10,
 	LogLevel:         "INFO",
 	EBPF: ebpfcommon.TracerConfig{
-		BatchLength:  100,
-		BatchTimeout: time.Second,
-		BpfBaseDir:   "/var/run/beyla",
+		BatchLength:                100,
+		BatchTimeout:               time.Second,
+		BpfBaseDir:                 DefaultBPFMountPath + "/beyla",
+		BlackBoxContextPropagation: false,
 	},
 	Grafana: otel.GrafanaConfig{
 		OTLP: otel.GrafanaOTLP{

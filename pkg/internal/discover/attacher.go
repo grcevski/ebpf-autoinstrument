@@ -29,6 +29,7 @@ type TraceAttacher struct {
 	DeleteTracers     chan *Instrumentable
 	Metrics           imetrics.Reporter
 	pinPath           string
+	bpfMounted        bool
 
 	// processInstances keeps track of the instances of each process. This will help making sure
 	// that we don't remove the BPF resources of an executable until all their instances are removed
@@ -46,6 +47,7 @@ func TraceAttacherProvider(ta TraceAttacher) (node.TerminalFunc[[]Event[Instrume
 	ta.existingTracers = map[uint64]*ebpf.ProcessTracer{}
 	ta.processInstances = helpers.MultiCounter[uint64]{}
 	ta.pinPath = BuildPinPath(ta.Cfg)
+	ta.bpfMounted = false
 
 	if err := ta.init(); err != nil {
 		ta.log.Error("cant start process tracer. Stopping it", "error", err)
@@ -141,6 +143,26 @@ func (ta *TraceAttacher) getTracer(ie *Instrumentable) (*ebpf.ProcessTracer, boo
 		ta.log.Warn("can't open executable. Ignoring",
 			"error", err, "pid", ie.FileInfo.Pid, "cmd", ie.FileInfo.CmdExePath)
 		return nil, false
+	}
+
+	if !ta.bpfMounted {
+		for _, p := range programs {
+			if p.UsesPinnedMaps() {
+				err := ta.initBpfFS()
+				if err != nil {
+					if p.Optional() {
+						ta.log.Warn("can't mount BPF file system for optional functionality",
+							"error", err, "pid", ie.FileInfo.Pid, "cmd", ie.FileInfo.CmdExePath)
+
+						continue
+					} else {
+						return nil, false
+					}
+				}
+				ta.bpfMounted = true
+				break
+			}
+		}
 	}
 
 	tracer := &ebpf.ProcessTracer{

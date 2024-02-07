@@ -97,7 +97,13 @@ func (pt *ProcessTracer) tracers() ([]Tracer, error) {
 				}
 			}
 			if err != nil {
-				printVerifierErrorInfo(err)
+				failedVerify := printVerifierErrorInfo(err)
+
+				if !failedVerify && p.Optional() {
+					plog.Warn("failed to load optional tracing functionality, likely a permission issue", "error", err)
+					continue
+				}
+
 				return nil, fmt.Errorf("loading and assigning BPF objects: %w", err)
 			}
 		}
@@ -136,11 +142,13 @@ func (pt *ProcessTracer) tracers() ([]Tracer, error) {
 	return tracers, nil
 }
 
-func printVerifierErrorInfo(err error) {
+func printVerifierErrorInfo(err error) bool {
 	var ve *ebpf.VerifierError
 	if errors.As(err, &ve) {
 		_, _ = fmt.Fprintf(os.Stderr, "Error Log:\n %v\n", strings.Join(ve.Log, "\n"))
+		return true
 	}
+	return false
 }
 
 func RunUtilityTracer(p UtilityTracer, pinPath string) error {

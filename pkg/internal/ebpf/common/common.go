@@ -52,6 +52,9 @@ type TracerConfig struct {
 	// If enabled, the kprobes based HTTP request tracking will start tracking the request
 	// headers to process any 'Traceparent' fields.
 	TrackRequestHeaders bool `yaml:"track_request_headers" env:"BEYLA_BPF_TRACK_REQUEST_HEADERS"`
+
+	// Enables the generic (black box) context propagation
+	BlackBoxContextPropagation bool `yaml:"generic_context_propagation" env:"BEYLA_BPF_GENERIC_CONTEXT_PROPAGATION"`
 }
 
 // Probe holds the information of the instrumentation points of a given function: its start and end offsets and

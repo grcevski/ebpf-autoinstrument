@@ -22,7 +22,6 @@
 #include "go_nethttp.h"
 #include "go_traceparent.h"
 #include "http_types.h"
-#include "tracing.h"
 #include "hpack.h"
 
 typedef struct http_func_invocation {

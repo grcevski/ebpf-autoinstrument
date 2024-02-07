@@ -9,12 +9,10 @@ import (
 
 	"github.com/grafana/beyla/pkg/beyla"
 	"github.com/grafana/beyla/pkg/internal/ebpf"
-	"github.com/grafana/beyla/pkg/internal/ebpf/goruntime"
-	"github.com/grafana/beyla/pkg/internal/ebpf/gosql"
-	"github.com/grafana/beyla/pkg/internal/ebpf/grpc"
+	"github.com/grafana/beyla/pkg/internal/ebpf/goext"
+	"github.com/grafana/beyla/pkg/internal/ebpf/goinst"
 	"github.com/grafana/beyla/pkg/internal/ebpf/httpfltr"
 	"github.com/grafana/beyla/pkg/internal/ebpf/httpssl"
-	"github.com/grafana/beyla/pkg/internal/ebpf/nethttp"
 	"github.com/grafana/beyla/pkg/internal/imetrics"
 	"github.com/grafana/beyla/pkg/internal/pipe/global"
 )
@@ -75,14 +73,15 @@ func (pf *ProcessFinder) Start(cfg *beyla.Config) (<-chan *ebpf.ProcessTracer, <
 // discovery pipeline
 
 func newGoTracersGroup(cfg *beyla.Config, metrics imetrics.Reporter) []ebpf.Tracer {
-	// Each program is an eBPF source: net/http, grpc...
-	return []ebpf.Tracer{
-		nethttp.New(&cfg.EBPF, metrics),
-		&nethttp.GinTracer{Tracer: *nethttp.New(&cfg.EBPF, metrics)},
-		grpc.New(&cfg.EBPF, metrics),
-		goruntime.New(&cfg.EBPF, metrics),
-		gosql.New(&cfg.EBPF, metrics),
+	t := []ebpf.Tracer{
+		goinst.New(&cfg.EBPF, metrics),
 	}
+
+	if cfg.EBPF.BlackBoxContextPropagation {
+		t = append(t, goext.New(&cfg.EBPF, metrics))
+	}
+
+	return t
 }
 
 func newNonGoTracersGroup(cfg *beyla.Config, metrics imetrics.Reporter) []ebpf.Tracer {

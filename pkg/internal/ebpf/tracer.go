@@ -47,6 +47,8 @@ type KprobesTracer interface {
 type Tracer interface {
 	PIDsAccounter
 	KprobesTracer
+	Optional() bool
+	UsesPinnedMaps() bool
 	// Constants returns a map of constants to be overriden into the eBPF program.
 	// The key is the constant name and the value is the value to overwrite.
 	Constants(*exec.FileInfo, *goexec.Offsets) map[string]any

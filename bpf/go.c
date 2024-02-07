@@ -9,8 +9,28 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include "go_runtime.h"
 #include "go_nethttp.h"
 #include "go_grpc.h"
+#include "go_sql.h"
+
+/* Go runtime goroutine tracking */
+SEC("uprobe/runtime_newproc1")
+int uprobe_proc_newproc1(struct pt_regs *ctx) {
+    runtime_proc_newproc1_start(ctx);
+    return 0;
+}
+
+SEC("uprobe/runtime_newproc1_return")
+int uprobe_proc_newproc1_ret(struct pt_regs *ctx) {
+    return runtime_proc_newproc1_end(ctx);
+}
+
+SEC("uprobe/runtime_goexit1")
+int uprobe_proc_goexit1(struct pt_regs *ctx) {
+    runtime_proc_goexit1_start(ctx);
+    return 0;
+}
 
 /* HTTP Server */
 
@@ -88,8 +108,7 @@ int uprobe_http2FramerWriteHeaders_returns(struct pt_regs *ctx) {
 #endif 
 }
 
-/* GRPC */
-
+/* GRPC Server */
 SEC("uprobe/server_handleStream")
 int uprobe_server_handleStream(struct pt_regs *ctx) {
     grpc_server_handleStream_start(ctx);
@@ -107,6 +126,7 @@ int uprobe_transport_writeStatus(struct pt_regs *ctx) {
     return 0;
 }
 
+/* GRPC Client */
 SEC("uprobe/ClientConn_Invoke")
 int uprobe_ClientConn_Invoke(struct pt_regs *ctx) {
     grpc_ClientConn_Invoke_start(ctx);
@@ -131,11 +151,13 @@ int uprobe_ClientConn_Invoke_return(struct pt_regs *ctx) {
     return grpc_ClientConn_Invoke_end(ctx);
 }
 
+/* GRPC Client context propagation */
+
 // The gRPC client stream is written on another goroutine in transport loopyWriter (controlbuf.go).
 // We extract the stream ID when it's just created and make a mapping of it to our goroutine that's executing ClientConn.Invoke.
 SEC("uprobe/transport_http2Client_NewStream")
 int uprobe_transport_http2Client_NewStream(struct pt_regs *ctx) {
-#ifndef NO_HEADER_PROPAGATION
+#if !defined(NO_HEADER_PROPAGATION) && !defined(PRE_LOOP)
     grpc_transport_http2Client_NewStream_start(ctx);
 #endif    
     return 0;
@@ -146,7 +168,7 @@ int uprobe_transport_http2Client_NewStream(struct pt_regs *ctx) {
 // goroutine.
 SEC("uprobe/transport_loopyWriter_writeHeader")
 int uprobe_transport_loopyWriter_writeHeader(struct pt_regs *ctx) {
-#ifndef NO_HEADER_PROPAGATION
+#if !defined(NO_HEADER_PROPAGATION) && !defined(PRE_LOOP)
     grpc_transport_loopyWriter_writeHeader_start(ctx);
 #endif
     return 0;
@@ -154,7 +176,7 @@ int uprobe_transport_loopyWriter_writeHeader(struct pt_regs *ctx) {
 
 SEC("uprobe/transport_loopyWriter_writeHeader_return")
 int uprobe_transport_loopyWriter_writeHeader_return(struct pt_regs *ctx) {
-#ifndef NO_HEADER_PROPAGATION
+#if !defined(NO_HEADER_PROPAGATION) && !defined(PRE_LOOP)
     grpc_transport_loopyWriter_writeHeader_end(ctx);
 #endif
     return 0;
@@ -162,11 +184,20 @@ int uprobe_transport_loopyWriter_writeHeader_return(struct pt_regs *ctx) {
 
 SEC("uprobe/hpack_Encoder_WriteField")
 int uprobe_hpack_Encoder_WriteField(struct pt_regs *ctx) {
-#ifndef NO_HEADER_PROPAGATION
+#if !defined(NO_HEADER_PROPAGATION) && !defined(PRE_LOOP)
     return grpc_hpack_Encoder_WriteField_start(ctx);
 #endif
     return 0;
 }
 
+/* SQL */
+SEC("uprobe/queryDC")
+int uprobe_queryDC(struct pt_regs *ctx) {
+    sql_queryDC_start(ctx);
+    return 0;
+}
 
-
+SEC("uprobe/queryDC")
+int uprobe_queryDCReturn(struct pt_regs *ctx) {
+    return sql_queryDC_end(ctx);
+}

@@ -40,9 +40,8 @@ typedef struct goroutine_metadata_t {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, void *); // key: pointer to the goroutine
-    __type(value, goroutine_metadata);  // value: timestamp of the goroutine creation
+    __type(value, goroutine_metadata);  // value: timestamp and parent of the goroutine creation
     __uint(max_entries, MAX_CONCURRENT_SHARED_REQUESTS);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
 } ongoing_goroutines SEC(".maps");
 
 struct {
@@ -57,7 +56,6 @@ struct {
     __type(key, void *); // key: pointer to the goroutine
     __type(value, tp_info_t);  // value: traceparent info
     __uint(max_entries, MAX_CONCURRENT_SHARED_REQUESTS);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
 } go_trace_map SEC(".maps");
 
 static __always_inline u64 find_parent_goroutine(void *goroutine_addr) {
