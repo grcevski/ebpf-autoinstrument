@@ -177,6 +177,10 @@ func (p *Tracer) SocketFilters() []*ebpf.Program {
 	return nil
 }
 
+func (p *Tracer) EgressTCFilter() *ebpf.Program {
+	return nil
+}
+
 func (p *Tracer) RecordInstrumentedLib(id uint64) {
 	libsMux.Lock()
 	defer libsMux.Unlock()

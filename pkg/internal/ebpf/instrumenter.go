@@ -4,9 +4,12 @@ package ebpf
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 	"syscall"
@@ -15,9 +18,11 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/prometheus/procfs"
+	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
 	ebpfcommon "github.com/grafana/beyla/pkg/internal/ebpf/common"
+	"github.com/grafana/beyla/pkg/internal/ebpf/httpfltr"
 	"github.com/grafana/beyla/pkg/internal/exec"
 	"github.com/grafana/beyla/pkg/internal/goexec"
 )
@@ -260,6 +265,108 @@ func (i *instrumenter) tracepoint(funcName string, programs ebpfcommon.FunctionP
 		i.closables = append(i.closables, kp)
 	}
 
+	return nil
+}
+
+func (i *instrumenter) tcfilter(p Tracer) error {
+	if p.EgressTCFilter() == nil {
+		return nil
+	}
+
+	err := attachTCFilter(p, p.EgressTCFilter())
+	if err != nil {
+		return fmt.Errorf("attaching socket filter: %w", err)
+	}
+
+	return nil
+}
+
+func attachTCFilter(p Tracer, filter *ebpf.Program) error {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return err
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return err
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			ip = ip.To4()
+			if ip == nil {
+				continue
+			}
+
+			ipvlan, err := netlink.LinkByIndex(iface.Index)
+			if err != nil {
+				return fmt.Errorf("failed to lookup ipvlan device %d (%s): %w", iface.Index, iface.Name, err)
+			}
+
+			qdiscAttrs := netlink.QdiscAttrs{
+				LinkIndex: ipvlan.Attrs().Index,
+				Handle:    netlink.MakeHandle(0xffff, 0),
+				Parent:    netlink.HANDLE_CLSACT,
+			}
+			qdisc := &netlink.GenericQdisc{
+				QdiscAttrs: qdiscAttrs,
+				QdiscType:  "clsact",
+			}
+			if err := netlink.QdiscDel(qdisc); err == nil {
+				fmt.Printf("qdisc clsact already existed. Deleted it\n")
+			}
+			if err := netlink.QdiscAdd(qdisc); err != nil {
+				if errors.Is(err, fs.ErrExist) {
+					fmt.Printf("qdisc clsact already exists. Ignoring %v\n", err)
+				} else {
+					// nolint:errorlint
+					return fmt.Errorf("failed to create clsact qdisc on %d (%s): %T %w", iface.Index, iface.Name, err, err)
+				}
+			}
+
+			// Fetch events on egress
+			egressAttrs := netlink.FilterAttrs{
+				LinkIndex: ipvlan.Attrs().Index,
+				Parent:    netlink.HANDLE_MIN_EGRESS,
+				Handle:    netlink.MakeHandle(0, 1),
+				Protocol:  3,
+				Priority:  1,
+			}
+			egressFilter := &netlink.BpfFilter{
+				FilterAttrs:  egressAttrs,
+				Fd:           filter.FD(),
+				Name:         "tc/egress_flow_parse",
+				DirectAction: true,
+			}
+			if err := netlink.FilterDel(egressFilter); err == nil {
+				fmt.Printf("egress filter already existed. Deleted it\n")
+			}
+			if err := netlink.FilterAdd(egressFilter); err != nil {
+				if errors.Is(err, fs.ErrExist) {
+					fmt.Printf("egress filter already exists. Ignoring %v\n", err)
+				} else {
+					return fmt.Errorf("failed to create egress filter: %w", err)
+				}
+			}
+
+			switch pp := p.(type) {
+			case *httpfltr.Tracer:
+				pp.AddEgressToClose(egressFilter, qdisc)
+			}
+		}
+	}
 	return nil
 }
 

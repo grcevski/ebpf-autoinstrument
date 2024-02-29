@@ -72,6 +72,7 @@ func main() {
 		slog.Info("Waiting 1s to collect coverage data...")
 		time.Sleep(time.Second)
 	}
+	time.Sleep(5 * time.Second)
 }
 
 func loadConfig(configPath *string) *beyla.Config {

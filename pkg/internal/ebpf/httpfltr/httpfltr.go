@@ -2,10 +2,14 @@ package httpfltr
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 
 	"github.com/cilium/ebpf"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	"github.com/grafana/beyla/pkg/beyla"
 	ebpfcommon "github.com/grafana/beyla/pkg/internal/ebpf/common"
@@ -29,6 +33,8 @@ type Tracer struct {
 	closers    []io.Closer
 	log        *slog.Logger
 	Service    *svc.ID
+	qdiscs     []*netlink.GenericQdisc
+	egress     []*netlink.BpfFilter
 }
 
 func New(cfg *beyla.Config, metrics imetrics.Reporter) *Tracer {
@@ -207,10 +213,19 @@ func (p *Tracer) SocketFilters() []*ebpf.Program {
 	return []*ebpf.Program{p.bpfObjects.SocketHttpFilter}
 }
 
+func (p *Tracer) EgressTCFilter() *ebpf.Program {
+	return p.bpfObjects.EgressHttp
+}
+
 func (p *Tracer) RecordInstrumentedLib(_ uint64) {}
 
 func (p *Tracer) AlreadyInstrumentedLib(_ uint64) bool {
 	return false
+}
+
+func (p *Tracer) AddEgressToClose(filter *netlink.BpfFilter, qdisc *netlink.GenericQdisc) {
+	p.egress = append(p.egress, filter)
+	p.qdiscs = append(p.qdiscs, qdisc)
 }
 
 func (p *Tracer) Run(ctx context.Context, eventsChan chan<- []request.Span) {
@@ -234,6 +249,8 @@ func (p *Tracer) Run(ctx context.Context, eventsChan chan<- []request.Span) {
 		p.log.Error("BPF Pids map is not created yet, this is a bug.")
 	}
 
+	defer p.deleteEgress()
+
 	ebpfcommon.SharedRingbuf(
 		&p.cfg.EBPF,
 		p.pidsFilter,
@@ -241,4 +258,32 @@ func (p *Tracer) Run(ctx context.Context, eventsChan chan<- []request.Span) {
 		p.metrics,
 		append(p.closers, &p.bpfObjects)...,
 	)(ctx, eventsChan)
+	fmt.Printf("WTF?\n")
+}
+
+func (p *Tracer) deleteEgress() {
+	p.log.Info("Deleting....", "egress", len(p.egress), "qdisc", len(p.qdiscs))
+
+	for _, ef := range p.egress {
+		doIgnoreNoDev(netlink.FilterDel, netlink.Filter(ef))
+	}
+	p.egress = []*netlink.BpfFilter{}
+	for _, qd := range p.qdiscs {
+		doIgnoreNoDev(netlink.QdiscDel, netlink.Qdisc(qd))
+	}
+	p.qdiscs = []*netlink.GenericQdisc{}
+}
+
+func doIgnoreNoDev[T any](sysCall func(T) error, dev T) error {
+	if err := sysCall(dev); err != nil {
+		if errors.Is(err, unix.ENODEV) {
+			fmt.Printf("can't delete. Ignore this error if other pods or interfaces "+
+				" are also being deleted at this moment. For example, if you are undeploying "+
+				" a FlowCollector or Deployment where this agent is part of %v\n",
+				err)
+		} else {
+			return err
+		}
+	}
+	return nil
 }

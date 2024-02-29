@@ -125,6 +125,11 @@ func (pt *ProcessTracer) tracers() ([]Tracer, error) {
 			return nil, err
 		}
 
+		if err := i.tcfilter(p); err != nil {
+			printVerifierErrorInfo(err)
+			return nil, err
+		}
+
 		tracers = append(tracers, p)
 	}
 

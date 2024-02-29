@@ -366,6 +366,7 @@ int socket__http_filter(struct __sk_buff *skb) {
             if (full_len > FULL_BUF_SIZE) {
                 full_len = FULL_BUF_SIZE;
             }
+
             read_skb_bytes(skb, tcp.hdr_len, info.buf, full_len);
             bpf_dbg_printk("=== http_filter len=%d %s ===", len, buf);
             //dbg_print_http_connection_info(&conn);
@@ -419,5 +420,67 @@ int BPF_KPROBE(kprobe_sys_exit, int status) {
     bpf_map_delete_elem(&clone_map, &task);
     bpf_map_delete_elem(&server_traces, &task);
     
+    return 0;
+}
+
+SEC("tc_egress")
+int egress_http(struct __sk_buff *skb) {
+    protocol_info_t tcp = {};
+    connection_info_t conn = {};
+
+    if (!read_sk_buff(skb, &tcp, &conn)) {
+        return 0;
+    }
+
+    // ignore ACK packets
+    if (tcp_ack(&tcp)) {
+        return 0;
+    }
+
+    // ignore empty packets, unless it's TCP FIN or TCP RST
+    if (!tcp_close(&tcp) && tcp_empty(&tcp, skb)) {
+        return 0;
+    }
+
+    // sorting must happen here, before we check or set dups
+    sort_connection_info(&conn);
+
+    // we don't want to read the whole buffer for every packed that passes our checks, we read only a bit and check if it's trully HTTP request/response.
+    unsigned char buf[MIN_HTTP_SIZE] = {0};
+    bpf_skb_load_bytes(skb, tcp.hdr_len, (void *)buf, sizeof(buf));
+    // technically the read should be reversed, but eBPF verifier complains on read with variable length
+    u32 len = skb->len - tcp.hdr_len;
+    if (len > MIN_HTTP_SIZE) {
+        len = MIN_HTTP_SIZE;
+    }
+
+    u8 packet_type = 0;
+    if (is_http(buf, len, &packet_type)) { // we must check tcp_close second, a packet can be a close and a response
+        if (packet_type == PACKET_TYPE_REQUEST) {
+            bpf_dbg_printk("tc_egress http TCP packet");
+
+            if (true) {
+                void *data = (void *)(__u64)skb->data;
+                struct iphdr *ip = (struct iphdr*)(data + sizeof(struct ethhdr));
+
+                __u32 offset_ip_checksum = offsetof(struct iphdr, check)+ sizeof(struct ethhdr);
+
+                bpf_skb_change_tail(skb, skb->len + 24, 0);
+                bpf_skb_pull_data(skb, 0);
+                __u32 offset_ip_tot_len = offsetof(struct iphdr, tot_len)+ sizeof(struct ethhdr);
+                __u16 tot_len = BPF_CORE_READ(ip, tot_len);
+                __u16 new_tot_len = bpf_htons(bpf_ntohs(tot_len) + 24);
+                bpf_l3_csum_replace(skb, offset_ip_checksum, tot_len, new_tot_len, sizeof(__u16));
+                bpf_skb_store_bytes(skb, offset_ip_tot_len, &new_tot_len, sizeof(__u16), 0);
+            }
+            // int ret = bpf_skb_adjust_room(skb, 24, BPF_ADJ_ROOM_NET, 0);
+            // if (ret) {
+            //     bpf_dbg_printk("Error calling adjust room");
+            // } else {
+            //     bpf_dbg_printk("Adjusted sdk room?");
+            // }            
+        }
+    }
+
     return 0;
 }

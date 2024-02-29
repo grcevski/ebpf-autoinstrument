@@ -206,6 +206,10 @@ func (p *Tracer) SocketFilters() []*ebpf.Program {
 	return nil
 }
 
+func (p *Tracer) EgressTCFilter() *ebpf.Program {
+	return nil
+}
+
 func (p *Tracer) RecordInstrumentedLib(_ uint64) {}
 
 func (p *Tracer) AlreadyInstrumentedLib(_ uint64) bool {

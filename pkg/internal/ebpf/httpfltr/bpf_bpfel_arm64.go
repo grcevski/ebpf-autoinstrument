@@ -170,6 +170,7 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
+	EgressHttp              *ebpf.ProgramSpec `ebpf:"egress_http"`
 	KprobeSysExit           *ebpf.ProgramSpec `ebpf:"kprobe_sys_exit"`
 	KprobeTcpConnect        *ebpf.ProgramSpec `ebpf:"kprobe_tcp_connect"`
 	KprobeTcpRcvEstablished *ebpf.ProgramSpec `ebpf:"kprobe_tcp_rcv_established"`
@@ -291,6 +292,7 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
+	EgressHttp              *ebpf.Program `ebpf:"egress_http"`
 	KprobeSysExit           *ebpf.Program `ebpf:"kprobe_sys_exit"`
 	KprobeTcpConnect        *ebpf.Program `ebpf:"kprobe_tcp_connect"`
 	KprobeTcpRcvEstablished *ebpf.Program `ebpf:"kprobe_tcp_rcv_established"`
@@ -306,6 +308,7 @@ type bpfPrograms struct {
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
+		p.EgressHttp,
 		p.KprobeSysExit,
 		p.KprobeTcpConnect,
 		p.KprobeTcpRcvEstablished,
