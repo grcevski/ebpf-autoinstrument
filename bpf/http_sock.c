@@ -330,7 +330,11 @@ int socket__http_filter(struct __sk_buff *skb) {
     protocol_info_t tcp = {};
     connection_info_t conn = {};
 
-    if (!read_sk_buff(skb, &tcp, &conn)) {
+    u8 hlen = 0;
+    u8 tcp_opt_type = 0;
+    u8 read_off = 0;
+
+    if (!read_sk_buff_opt(skb, &tcp, &conn, &hlen, &tcp_opt_type, &read_off)) {
         return 0;
     }
 
@@ -363,12 +367,19 @@ int socket__http_filter(struct __sk_buff *skb) {
 
         if (packet_type == PACKET_TYPE_REQUEST) {
             u32 full_len = skb->len - tcp.hdr_len;
-            if (full_len > FULL_BUF_SIZE) {
-                full_len = FULL_BUF_SIZE;
+            bpf_clamp_umax(full_len, FULL_BUF_SIZE-4);
+
+            read_skb_bytes(skb, tcp.hdr_len, info.buf, FULL_BUF_SIZE);
+            bpf_printk("%x", info.buf[full_len]);
+
+            u32 t_id = 0;
+            u32 s_id = 0;
+            if (hlen >= 32 && tcp_opt_type == 1) {
+                bpf_skb_load_bytes(skb, read_off, &t_id, sizeof(t_id));
+                bpf_skb_load_bytes(skb, read_off + 4, &s_id, sizeof(s_id));
             }
 
-            read_skb_bytes(skb, tcp.hdr_len, info.buf, full_len);
-            bpf_dbg_printk("=== http_filter len=%d %s ===", len, buf);
+            bpf_dbg_printk("=== http_filter len=%d t_id:%x s_id:%x %s ===", len, t_id, s_id, buf);
             //dbg_print_http_connection_info(&conn);
             set_fallback_http_info(&info, &conn, skb->len - tcp.hdr_len);
         }
@@ -427,8 +438,11 @@ SEC("tc_egress")
 int egress_http(struct __sk_buff *skb) {
     protocol_info_t tcp = {};
     connection_info_t conn = {};
+    u8 hlen = 0;
+    u8 tcp_opt_type = 0;
+    u8 write_off = 0;
 
-    if (!read_sk_buff(skb, &tcp, &conn)) {
+    if (!read_sk_buff_opt(skb, &tcp, &conn, &hlen, &tcp_opt_type, &write_off)) {
         return 0;
     }
 
@@ -457,28 +471,15 @@ int egress_http(struct __sk_buff *skb) {
     u8 packet_type = 0;
     if (is_http(buf, len, &packet_type)) { // we must check tcp_close second, a packet can be a close and a response
         if (packet_type == PACKET_TYPE_REQUEST) {
-            bpf_dbg_printk("tc_egress http TCP packet");
+            bpf_dbg_printk("tc_egress http TCP packet");       
 
-            if (true) {
-                void *data = (void *)(__u64)skb->data;
-                struct iphdr *ip = (struct iphdr*)(data + sizeof(struct ethhdr));
-
-                __u32 offset_ip_checksum = offsetof(struct iphdr, check)+ sizeof(struct ethhdr);
-
-                bpf_skb_change_tail(skb, skb->len + 24, 0);
-                bpf_skb_pull_data(skb, 0);
-                __u32 offset_ip_tot_len = offsetof(struct iphdr, tot_len)+ sizeof(struct ethhdr);
-                __u16 tot_len = BPF_CORE_READ(ip, tot_len);
-                __u16 new_tot_len = bpf_htons(bpf_ntohs(tot_len) + 24);
-                bpf_l3_csum_replace(skb, offset_ip_checksum, tot_len, new_tot_len, sizeof(__u16));
-                bpf_skb_store_bytes(skb, offset_ip_tot_len, &new_tot_len, sizeof(__u16), 0);
+            if (hlen >= 32 && tcp_opt_type == 1) {
+                u32 t_id = bpf_get_prandom_u32();
+                u32 s_id = bpf_get_prandom_u32();
+                bpf_skb_store_bytes(skb, write_off, &t_id, sizeof(u32), 0);
+                bpf_skb_store_bytes(skb, write_off+4, &s_id, sizeof(u32), 0);
+                bpf_printk("Storing t_id=%x, s_id=%x", t_id, s_id);
             }
-            // int ret = bpf_skb_adjust_room(skb, 24, BPF_ADJ_ROOM_NET, 0);
-            // if (ret) {
-            //     bpf_dbg_printk("Error calling adjust room");
-            // } else {
-            //     bpf_dbg_printk("Adjusted sdk room?");
-            // }            
         }
     }
 
