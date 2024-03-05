@@ -117,7 +117,7 @@ static __always_inline bool tcp_empty(protocol_info_t *tcp, struct __sk_buff *sk
     return tcp->hdr_len == skb->len; 
 }
 
-static __always_inline bool read_sk_buff_opt(struct __sk_buff *skb, protocol_info_t *tcp, connection_info_t *conn, u8 *hlen, u8 *tcp_opt_type, u8 *hack_off) {
+static __always_inline bool read_sk_buff_opt(struct __sk_buff *skb, protocol_info_t *tcp, connection_info_t *conn, u8 *hlen, u8 *tcp_opt_type, u8 *hack_off, u16 *tot_len, u16 *header_proto) {
     // we read the protocol just like here linux/samples/bpf/parse_ldabs.c
     u16 h_proto;
     bpf_skb_load_bytes(skb, offsetof(struct ethhdr, h_proto), &h_proto, sizeof(h_proto));
@@ -139,6 +139,8 @@ static __always_inline bool read_sk_buff_opt(struct __sk_buff *skb, protocol_inf
             return false;
         }
 
+        bpf_skb_load_bytes(skb, ETH_HLEN + offsetof(struct iphdr, tot_len), tot_len, sizeof(u16));
+
         // we read the ip header linux/samples/bpf/parse_ldabs.c and linux/samples/bpf/tcbpf1_kern.c
         // the level 4 protocol let's us only filter TCP packets, the ip protocol gets us the source
         // and destination IP pairs
@@ -158,6 +160,8 @@ static __always_inline bool read_sk_buff_opt(struct __sk_buff *skb, protocol_inf
         break;
     }
     case ETH_P_IPV6:
+        bpf_skb_load_bytes(skb, ETH_HLEN + offsetof(struct ipv6hdr, payload_len), tot_len, sizeof(u16));
+
         bpf_skb_load_bytes(skb, ETH_HLEN + offsetof(struct ipv6hdr, nexthdr), &proto, sizeof(proto));
 
         bpf_skb_load_bytes(skb, ETH_HLEN + offsetof(struct ipv6hdr, saddr), &conn->s_addr, sizeof(conn->s_addr));
@@ -172,6 +176,8 @@ static __always_inline bool read_sk_buff_opt(struct __sk_buff *skb, protocol_inf
     if (proto != IPPROTO_TCP) {
         return false;
     }
+
+    *header_proto = h_proto;
 
     u16 port;
     bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct __tcphdr, source), &port, sizeof(port));
@@ -192,7 +198,7 @@ static __always_inline bool read_sk_buff_opt(struct __sk_buff *skb, protocol_inf
 
     *tcp_opt_type = 0;
     *hlen = doff;
-    *hack_off = tcp->hdr_len + 21;
+    *hack_off = tcp->hdr_len + 18;
 
     bpf_skb_load_bytes(skb, tcp->hdr_len + 20, tcp_opt_type, sizeof(u8));
 

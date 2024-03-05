@@ -333,8 +333,10 @@ int socket__http_filter(struct __sk_buff *skb) {
     u8 hlen = 0;
     u8 tcp_opt_type = 0;
     u8 read_off = 0;
+    u16 tot_len = 0;
+    u16 h_proto = 0;
 
-    if (!read_sk_buff_opt(skb, &tcp, &conn, &hlen, &tcp_opt_type, &read_off)) {
+    if (!read_sk_buff_opt(skb, &tcp, &conn, &hlen, &tcp_opt_type, &read_off, &tot_len, &h_proto)) {
         return 0;
     }
 
@@ -441,8 +443,10 @@ int egress_http(struct __sk_buff *skb) {
     u8 hlen = 0;
     u8 tcp_opt_type = 0;
     u8 write_off = 0;
+    u16 tot_len = 0;
+    u16 h_proto = 0;
 
-    if (!read_sk_buff_opt(skb, &tcp, &conn, &hlen, &tcp_opt_type, &write_off)) {
+    if (!read_sk_buff_opt(skb, &tcp, &conn, &hlen, &tcp_opt_type, &write_off, &tot_len, &h_proto)) {
         return 0;
     }
 
@@ -474,11 +478,40 @@ int egress_http(struct __sk_buff *skb) {
             bpf_dbg_printk("tc_egress http TCP packet");       
 
             if (hlen >= 32 && tcp_opt_type == 1) {
-                u32 t_id = bpf_get_prandom_u32();
-                u32 s_id = bpf_get_prandom_u32();
-                bpf_skb_store_bytes(skb, write_off, &t_id, sizeof(u32), 0);
-                bpf_skb_store_bytes(skb, write_off+4, &s_id, sizeof(u32), 0);
-                bpf_printk("Storing t_id=%x, s_id=%x", t_id, s_id);
+                // u32 t_id = bpf_get_prandom_u32();
+                // u32 s_id = bpf_get_prandom_u32();
+
+                // bpf_skb_change_tail(skb, skb->len + 1, 0);
+                // bpf_skb_pull_data(skb, 0);
+
+                // u32 offset_ip_tot_len = 0;
+                // u32 offset_ip_checksum = 0;
+                // if (h_proto == ETH_P_IP) {
+                //     offset_ip_tot_len = ETH_HLEN + offsetof(struct iphdr, tot_len);
+                //     offset_ip_checksum = ETH_HLEN + offsetof(struct iphdr, check);
+                // } else {
+                //     offset_ip_tot_len = ETH_HLEN + offsetof(struct ipv6hdr, payload_len);
+                // }            
+
+                // u16 new_tot_len = bpf_htons(bpf_ntohs(tot_len) + 1);
+
+                // bpf_printk("tot_len = %d, tot_len_alt = %d, new_tot_len = %d, new_tot_len_alt = %d, h_proto = %d, skb->len = %d", tot_len, bpf_ntohs(tot_len), new_tot_len, bpf_ntohs(new_tot_len), h_proto, skb->len);
+
+                // if (offset_ip_checksum) {
+                //     bpf_l3_csum_replace(skb, offset_ip_checksum, tot_len, new_tot_len, sizeof(u16));
+                // }
+
+                // bpf_skb_store_bytes(skb, offset_ip_tot_len, &new_tot_len, sizeof(u16), 0);
+                // u8 val = 0x20;
+                // bpf_skb_store_bytes(skb, skb->len-1, &val, sizeof(u8), 0);
+
+                // u8 flags = 0xff;
+
+                // bpf_skb_store_bytes(skb, write_off-1, &flags, sizeof(u8), 0);
+                u16 flags = 0xbaba;
+                bpf_skb_store_bytes(skb, write_off, &flags, sizeof(u16), 0);
+                //bpf_skb_store_bytes(skb, write_off+4, &s_id, sizeof(u32), 0);
+                //bpf_printk("Storing t_id=%x, s_id=%x", t_id, s_id);
             }
         }
     }

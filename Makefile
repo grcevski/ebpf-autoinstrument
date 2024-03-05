@@ -160,13 +160,18 @@ compile:
 	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -mod vendor -ldflags="-X '$(BUILDINFO_PKG).Version=$(RELEASE_VERSION)' -X '$(BUILDINFO_PKG).Revision=$(RELEASE_REVISION)'" -a -o bin/$(CMD) $(MAIN_GO_FILE)
 
 .PHONY: dev
-dev: prereqs generate compile-for-coverage
+dev: prereqs generate compile-for-debug
 
 # Generated binary can provide coverage stats according to https://go.dev/blog/integration-test-coverage
 .PHONY: compile-for-coverage
 compile-for-coverage:
 	@echo "### Compiling project to generate coverage profiles"
 	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -mod vendor -cover -a -o bin/$(CMD) $(MAIN_GO_FILE)
+
+.PHONY: compile-for-debug
+compile-for-debug:
+	@echo "### Compiling project to generate debug build"
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -gcflags=all="-N -l" -mod vendor -a -o bin/$(CMD) $(MAIN_GO_FILE)
 
 .PHONY: test
 test:
