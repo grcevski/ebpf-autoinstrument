@@ -196,6 +196,7 @@ type bpf_debugMapSpecs struct {
 	ActiveSslWriteArgs      *ebpf.MapSpec `ebpf:"active_ssl_write_args"`
 	CloneMap                *ebpf.MapSpec `ebpf:"clone_map"`
 	Events                  *ebpf.MapSpec `ebpf:"events"`
+	ExistingRequests        *ebpf.MapSpec `ebpf:"existing_requests"`
 	FilteredConnections     *ebpf.MapSpec `ebpf:"filtered_connections"`
 	Http2InfoMem            *ebpf.MapSpec `ebpf:"http2_info_mem"`
 	HttpInfoMem             *ebpf.MapSpec `ebpf:"http_info_mem"`
@@ -241,6 +242,7 @@ type bpf_debugMaps struct {
 	ActiveSslWriteArgs      *ebpf.Map `ebpf:"active_ssl_write_args"`
 	CloneMap                *ebpf.Map `ebpf:"clone_map"`
 	Events                  *ebpf.Map `ebpf:"events"`
+	ExistingRequests        *ebpf.Map `ebpf:"existing_requests"`
 	FilteredConnections     *ebpf.Map `ebpf:"filtered_connections"`
 	Http2InfoMem            *ebpf.Map `ebpf:"http2_info_mem"`
 	HttpInfoMem             *ebpf.Map `ebpf:"http_info_mem"`
@@ -269,6 +271,7 @@ func (m *bpf_debugMaps) Close() error {
 		m.ActiveSslWriteArgs,
 		m.CloneMap,
 		m.Events,
+		m.ExistingRequests,
 		m.FilteredConnections,
 		m.Http2InfoMem,
 		m.HttpInfoMem,

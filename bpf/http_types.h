@@ -77,6 +77,7 @@ typedef struct protocol_info {
     u32 hdr_len;
     u32 seq;
     u8  flags;
+    u32 ack;
 } protocol_info_t;
 
 // Here we keep information on the ongoing filtered connections, PID/TID and connection type

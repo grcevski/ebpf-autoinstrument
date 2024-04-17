@@ -330,6 +330,8 @@ int socket__http_filter(struct __sk_buff *skb) {
     protocol_info_t tcp = {};
     connection_info_t conn = {};
 
+    http_info_t info = {0};
+
     u8 hlen = 0;
     u8 tcp_opt_type = 0;
     u8 read_off = 0;
@@ -338,6 +340,20 @@ int socket__http_filter(struct __sk_buff *skb) {
 
     if (!read_sk_buff_opt(skb, &tcp, &conn, &hlen, &tcp_opt_type, &read_off, &tot_len, &h_proto)) {
         return 0;
+    }
+
+    if (0 && !tcp.flags) {
+        bpf_dbg_printk("SYN packed len = %d", skb->len);
+
+        bpf_skb_load_bytes(skb, tcp.hdr_len, &info.buf, sizeof(info.buf));
+
+        s32 len = skb->len-2;
+        bpf_clamp_umax(len, FULL_BUF_SIZE);
+
+        if (len > 2 && len < (FULL_BUF_SIZE-2)) {
+            bpf_printk("AAA: %x", info.buf[len]);
+            bpf_printk("BBB: %x", info.buf[len+1]);
+        }
     }
 
     // ignore ACK packets
@@ -364,7 +380,6 @@ int socket__http_filter(struct __sk_buff *skb) {
 
     u8 packet_type = 0;
     if (is_http(buf, len, &packet_type)) { // we must check tcp_close second, a packet can be a close and a response
-        http_info_t info = {0};
         info.conn_info = conn;
 
         if (packet_type == PACKET_TYPE_REQUEST) {
@@ -372,7 +387,11 @@ int socket__http_filter(struct __sk_buff *skb) {
             bpf_clamp_umax(full_len, FULL_BUF_SIZE-4);
 
             read_skb_bytes(skb, tcp.hdr_len, info.buf, FULL_BUF_SIZE);
-            bpf_printk("%x", info.buf[full_len]);
+            bpf_printk("seq = %d ack = %d | %s", tcp.seq, tcp.ack, info.buf);
+
+            u32 data = 0;
+            bpf_skb_load_bytes(skb, read_off, &data, sizeof(data));
+            bpf_printk("options %llx", data);
 
             u32 t_id = 0;
             u32 s_id = 0;
@@ -384,6 +403,8 @@ int socket__http_filter(struct __sk_buff *skb) {
             bpf_dbg_printk("=== http_filter len=%d t_id:%x s_id:%x %s ===", len, t_id, s_id, buf);
             //dbg_print_http_connection_info(&conn);
             set_fallback_http_info(&info, &conn, skb->len - tcp.hdr_len);
+        } else if (packet_type) {
+            bpf_printk("RESP seq = %d ack = %d", tcp.seq, tcp.ack);
         }
     }
 
@@ -436,6 +457,14 @@ int BPF_KPROBE(kprobe_sys_exit, int status) {
     return 0;
 }
 
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __type(key, connection_info_t);
+    __type(value, u8);
+    __uint(max_entries, 1024);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} existing_requests SEC(".maps");
+
 SEC("tc_egress")
 int egress_http(struct __sk_buff *skb) {
     protocol_info_t tcp = {};
@@ -450,18 +479,63 @@ int egress_http(struct __sk_buff *skb) {
         return 0;
     }
 
+    //bpf_dbg_printk("TCP flags %x, seq %d, skb->len %d", tcp.flags, tcp.seq, skb->len);
+    
+    // sorting must happen here, before we check or set dups
+    sort_connection_info(&conn);
+    //dbg_print_http_connection_info(&conn);
+
+    if (0 && !tcp.flags) {
+        bpf_dbg_printk("SYN packed len = %d", skb->len);
+
+        u8* exists = bpf_map_lookup_elem(&existing_requests, &conn);
+        if (!exists) {
+            u8 set=1;
+            u8 val=0xba;
+
+            uint16_t pkt_end = skb->data_end - skb->data;
+            bpf_printk("Changing tail and setting data on syn, end=%d", pkt_end);
+            bpf_skb_change_tail(skb, pkt_end + 1, 0);
+            bpf_skb_store_bytes(skb, pkt_end, &val, sizeof(u8), 0);
+
+            u32 offset_ip_tot_len = 0;
+            u32 offset_ip_checksum = 0;
+            if (h_proto == ETH_P_IP) {
+                offset_ip_tot_len = ETH_HLEN + offsetof(struct iphdr, tot_len);
+                offset_ip_checksum = ETH_HLEN + offsetof(struct iphdr, check);
+            } else {
+                offset_ip_tot_len = ETH_HLEN + offsetof(struct ipv6hdr, payload_len);
+            }            
+
+            u16 new_tot_len = bpf_htons(bpf_ntohs(tot_len) + 1);
+
+            bpf_printk("tot_len = %d, tot_len_alt = %d, new_tot_len = %d, new_tot_len_alt = %d, h_proto = %d, skb->len = %d", tot_len, bpf_ntohs(tot_len), new_tot_len, bpf_ntohs(new_tot_len), h_proto, skb->len);
+
+            if (offset_ip_checksum) {
+                bpf_l3_csum_replace(skb, offset_ip_checksum, tot_len, new_tot_len, sizeof(u16));
+            }
+
+            bpf_skb_store_bytes(skb, offset_ip_tot_len, &new_tot_len, sizeof(u16), 0);
+
+            bpf_map_update_elem(&existing_requests, &conn, &set, BPF_ANY);
+        } else {
+            bpf_dbg_printk("already seen");
+        }
+    }
+
     // ignore ACK packets
     if (tcp_ack(&tcp)) {
         return 0;
+    }
+
+    if (tcp_close(&tcp)) {
+        bpf_map_delete_elem(&existing_requests, &conn);
     }
 
     // ignore empty packets, unless it's TCP FIN or TCP RST
     if (!tcp_close(&tcp) && tcp_empty(&tcp, skb)) {
         return 0;
     }
-
-    // sorting must happen here, before we check or set dups
-    sort_connection_info(&conn);
 
     // we don't want to read the whole buffer for every packed that passes our checks, we read only a bit and check if it's trully HTTP request/response.
     unsigned char buf[MIN_HTTP_SIZE] = {0};
@@ -475,7 +549,48 @@ int egress_http(struct __sk_buff *skb) {
     u8 packet_type = 0;
     if (is_http(buf, len, &packet_type)) { // we must check tcp_close second, a packet can be a close and a response
         if (packet_type == PACKET_TYPE_REQUEST) {
-            bpf_dbg_printk("tc_egress http TCP packet");       
+            bpf_dbg_printk("tc_egress http TCP packet seq = %d ack = %d options_len = %d", tcp.seq, tcp.ack, tcp.hdr_len - write_off);
+            //u8 data = 'P';
+
+            s32 options_len = tcp.hdr_len - write_off;
+            if (options_len > 0) {
+                u8 data = 0;
+                bpf_skb_load_bytes(skb, write_off, &data, sizeof(data));
+                bpf_printk("options %llx", data);
+
+                if (data == 0x01) { // nop
+                    u32 new_data = 0x00aa010f;
+                    bpf_skb_store_bytes(skb, write_off, &new_data, sizeof(u32), 0);
+                }
+            }
+
+            //uint16_t pkt_end = skb->data_end - skb->data;
+            //bpf_printk("Changing tail and setting data on syn, end=%d", pkt_end);
+            //bpf_skb_change_tail(skb, pkt_end + 1, 0);
+            //bpf_skb_store_bytes(skb, pkt_end, &data, sizeof(u8), 0);
+
+            //u32 offset_ip_tot_len = 0;
+            //u32 offset_ip_checksum = 0;
+            //if (h_proto == ETH_P_IP) {
+            //    offset_ip_tot_len = ETH_HLEN + offsetof(struct iphdr, tot_len);
+            //    offset_ip_checksum = ETH_HLEN + offsetof(struct iphdr, check);
+            //} else {
+            //    offset_ip_tot_len = ETH_HLEN + offsetof(struct ipv6hdr, payload_len);
+            //}            
+
+            u16 new_tot_len = bpf_htons(bpf_ntohs(tot_len) + 1);
+
+            bpf_printk("tot_len = %d, tot_len_alt = %d, new_tot_len = %d, new_tot_len_alt = %d, h_proto = %d, skb->len = %d", tot_len, bpf_ntohs(tot_len), new_tot_len, bpf_ntohs(new_tot_len), h_proto, skb->len);
+
+            //if (offset_ip_checksum) {
+            //    bpf_l3_csum_replace(skb, offset_ip_checksum, tot_len, new_tot_len, sizeof(u16));
+            //}
+
+            //bpf_skb_store_bytes(skb, offset_ip_tot_len, &new_tot_len, sizeof(u16), 0);
+
+            //bpf_map_update_elem(&existing_requests, &conn, &set, BPF_ANY);
+
+            //bpf_skb_store_bytes(skb, tcp.hdr_len, &data, sizeof(u8), 0);       
 
             if (hlen >= 32 && tcp_opt_type == 1) {
                 // u32 t_id = bpf_get_prandom_u32();
@@ -505,11 +620,12 @@ int egress_http(struct __sk_buff *skb) {
                 // u8 val = 0x20;
                 // bpf_skb_store_bytes(skb, skb->len-1, &val, sizeof(u8), 0);
 
-                // u8 flags = 0xff;
+                //u32 flags = 0xff;
 
-                // bpf_skb_store_bytes(skb, write_off-1, &flags, sizeof(u8), 0);
-                u16 flags = 0xbaba;
-                bpf_skb_store_bytes(skb, write_off, &flags, sizeof(u16), 0);
+                //bpf_skb_store_bytes(skb, write_off-1, &flags, sizeof(u8), 0);
+                //u16 flags = 0xbaba;
+                //bpf_skb_store_bytes(skb, write_off, &flags, sizeof(u32), 0);
+                //bpf_l4_csum_replace(skb, write_off, tcp.ack, flags, sizeof(u32));
                 //bpf_skb_store_bytes(skb, write_off+4, &s_id, sizeof(u32), 0);
                 //bpf_printk("Storing t_id=%x, s_id=%x", t_id, s_id);
             }

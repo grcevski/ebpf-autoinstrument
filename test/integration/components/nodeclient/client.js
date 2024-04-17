@@ -1,5 +1,5 @@
 const http = require('http');
-const url = 'http://grafana.com';
+const url = 'http://localhost:8090/smoke';
 
 var count = 1
 
@@ -11,7 +11,8 @@ function smoke() {
     const options = {
         headers: {
             "traceParent": "00-" + traceStr + "0000000000000000-" + traceStr + "-01"
-        }
+        },
+	agent: new http.Agent({ keepAlive: false })
     }
 
     count += 1;
@@ -28,8 +29,7 @@ function smoke() {
 function smokeLoop() {
     setInterval(() => {
         smoke();
-    }, 1000);
+    }, 10000);
 }
 
-smoke();
 smokeLoop();
