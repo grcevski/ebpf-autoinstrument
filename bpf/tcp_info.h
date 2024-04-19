@@ -210,11 +210,11 @@ static __always_inline bool read_sk_buff_opt(struct __sk_buff *skb, protocol_inf
 
     bpf_skb_load_bytes(skb, tcp->hdr_len + 20, tcp_opt_type, sizeof(u8));
 
-    tcp->hdr_len += doff;
-
     u8 flags;
     bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct __tcphdr, ack_seq) + 4 + 1, &flags, sizeof(flags)); // read the second byte past __tcphdr->doff, again bit fields offsets
     tcp->flags = flags;
+
+    tcp->hdr_len += doff;
 
     return true;
 }

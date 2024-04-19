@@ -342,17 +342,17 @@ int socket__http_filter(struct __sk_buff *skb) {
         return 0;
     }
 
-    if (0 && !tcp.flags) {
+    if (tcp_syn(&tcp)) {
         bpf_dbg_printk("SYN packed len = %d", skb->len);
 
         bpf_skb_load_bytes(skb, tcp.hdr_len, &info.buf, sizeof(info.buf));
 
-        s32 len = skb->len-2;
+        s32 len = skb->len-sizeof(u32);
         bpf_clamp_umax(len, FULL_BUF_SIZE);
 
-        if (len > 2 && len < (FULL_BUF_SIZE-2)) {
-            bpf_printk("AAA: %x", info.buf[len]);
-            bpf_printk("BBB: %x", info.buf[len+1]);
+        if (len > sizeof(u32) && len < (FULL_BUF_SIZE-sizeof(u32))) {
+            bpf_printk("AAA: %x", *((u32 *)&info.buf[len]));
+            //bpf_printk("BBB: %x", info.buf[len+1]);
         }
     }
 
@@ -485,18 +485,18 @@ int egress_http(struct __sk_buff *skb) {
     sort_connection_info(&conn);
     //dbg_print_http_connection_info(&conn);
 
-    if (0 && !tcp.flags) {
+    if (tcp_syn(&tcp)) {
         bpf_dbg_printk("SYN packed len = %d", skb->len);
 
         u8* exists = bpf_map_lookup_elem(&existing_requests, &conn);
         if (!exists) {
             u8 set=1;
-            u8 val=0xba;
+            u32 val=0xdeadf00d;
 
             uint16_t pkt_end = skb->data_end - skb->data;
             bpf_printk("Changing tail and setting data on syn, end=%d", pkt_end);
-            bpf_skb_change_tail(skb, pkt_end + 1, 0);
-            bpf_skb_store_bytes(skb, pkt_end, &val, sizeof(u8), 0);
+            bpf_skb_change_tail(skb, pkt_end + sizeof(val), 0);
+            bpf_skb_store_bytes(skb, pkt_end, &val, sizeof(val), 0);
 
             u32 offset_ip_tot_len = 0;
             u32 offset_ip_checksum = 0;
@@ -507,7 +507,7 @@ int egress_http(struct __sk_buff *skb) {
                 offset_ip_tot_len = ETH_HLEN + offsetof(struct ipv6hdr, payload_len);
             }            
 
-            u16 new_tot_len = bpf_htons(bpf_ntohs(tot_len) + 1);
+            u16 new_tot_len = bpf_htons(bpf_ntohs(tot_len) + sizeof(val));
 
             bpf_printk("tot_len = %d, tot_len_alt = %d, new_tot_len = %d, new_tot_len_alt = %d, h_proto = %d, skb->len = %d", tot_len, bpf_ntohs(tot_len), new_tot_len, bpf_ntohs(new_tot_len), h_proto, skb->len);
 
