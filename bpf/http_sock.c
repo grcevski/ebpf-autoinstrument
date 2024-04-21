@@ -343,17 +343,12 @@ int socket__http_filter(struct __sk_buff *skb) {
     }
 
     if (tcp_syn(&tcp)) {
-        bpf_dbg_printk("SYN packed len = %d", skb->len);
-
-        bpf_skb_load_bytes(skb, tcp.hdr_len, &info.buf, sizeof(info.buf));
+        bpf_skb_load_bytes(skb, tcp.hdr_len, &info.buf, 4);
 
         s32 len = skb->len-sizeof(u32);
-        bpf_clamp_umax(len, FULL_BUF_SIZE);
+        bpf_printk("SYN packed len = %d, offset = %d, hdr_len %d", skb->len, len, tcp.hdr_len);
 
-        if (len > sizeof(u32) && len < (FULL_BUF_SIZE-sizeof(u32))) {
-            bpf_printk("AAA: %x", *((u32 *)&info.buf[len]));
-            //bpf_printk("BBB: %x", info.buf[len+1]);
-        }
+        bpf_printk("***Data: %x%x%x%x", info.buf[3], info.buf[2], info.buf[1], info.buf[0]);
     }
 
     // ignore ACK packets
