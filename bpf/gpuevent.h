@@ -4,6 +4,9 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+#ifndef GPU_EVENT_H
+#define GPU_EVENT_H
+
 #pragma once
 #define TASK_COMM_LEN 16
 #define MAX_GPUKERN_ARGS 16
@@ -27,3 +30,5 @@ typedef struct gpu_kernel_launch {
   size_t ustack_sz;
   stack_trace_t ustack;
 } __attribute__((packed)) gpu_kernel_launch_t;
+
+#endif

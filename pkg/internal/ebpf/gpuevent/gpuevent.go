@@ -136,7 +136,7 @@ func (p *Tracer) Run(ctx context.Context, eventsChan chan<- []request.Span) {
 	ebpfcommon.SharedRingbuf(
 		&p.cfg.EBPF,
 		p.pidsFilter,
-		p.bpfObjects.Rb,
+		p.bpfObjects.Events,
 		p.metrics,
 		p.FileInfo,
 	)(ctx, append(p.closers, &p.bpfObjects), eventsChan)
