@@ -53,11 +53,8 @@ int BPF_KPROBE(handle_cuda_launch,
         return 0;
     }
 
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-
     e->flags = EVENT_GPU_KERNEL_LAUNCH;
-    e->pid = bpf_get_current_pid_tgid() >> 32;
-    e->ppid = BPF_CORE_READ(task, real_parent, tgid);
+    task_pid(&e->pid_info);
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
     e->kern_func_off = func_off;

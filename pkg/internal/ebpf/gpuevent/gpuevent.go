@@ -36,17 +36,21 @@ type Tracer struct {
 	closers    []io.Closer
 	log        *slog.Logger
 	Service    *svc.ID
-	FileInfo   *exec.FileInfo
 }
 
 func New(cfg *beyla.Config, metrics imetrics.Reporter, fileInfo *exec.FileInfo) *Tracer {
 	log := slog.With("component", "gpuevent.Tracer")
+
+	if fileInfo == nil || fileInfo.ELF == nil {
+		log.Error("Empty fileinfo for Cuda")
+	} else {
+		ebpfcommon.ProcessCudaFileInfo(fileInfo)
+	}
 	return &Tracer{
 		log:        log,
 		cfg:        cfg,
 		metrics:    metrics,
 		pidsFilter: ebpfcommon.CommonPIDsFilter(cfg.Discovery.SystemWide),
-		FileInfo:   fileInfo,
 	}
 }
 
@@ -138,6 +142,5 @@ func (p *Tracer) Run(ctx context.Context, eventsChan chan<- []request.Span) {
 		p.pidsFilter,
 		p.bpfObjects.Events,
 		p.metrics,
-		p.FileInfo,
 	)(ctx, append(p.closers, &p.bpfObjects), eventsChan)
 }

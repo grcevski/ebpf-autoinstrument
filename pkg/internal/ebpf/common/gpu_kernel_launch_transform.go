@@ -14,7 +14,53 @@ import (
 	"github.com/grafana/beyla/pkg/internal/request"
 )
 
-func ReadGPUKernelLaunchIntoSpan(record *ringbuf.Record, fileInfo *exec.FileInfo) (request.Span, bool, error) {
+type pidKey struct {
+	Pid int32
+	Ns uint32
+}
+
+var pidMap = map[pidKey]uint64{}
+var symbolsMap = map[uint64]map[uint64]string{}
+
+func ProcessCudaFileInfo(info *exec.FileInfo) {
+	k := pidKey{Pid:info.Pid, Ns: info.Ns}
+	if _, ok := pidMap[k]; ok {
+		return
+	}
+
+	pidMap[k] = info.Ino
+	if _, ok := symbolsMap[info.Ino]; ok {
+		return
+	}
+
+	symAddr, err := FindSymbolAddresses(info.ELF)
+	if err != nil {
+		slog.Error("failed to find symbol addresses", "error", err)
+		return
+	}
+
+	symbolsMap[info.Ino] = symAddr
+}
+
+func symForAddr(pid int32, ns uint32, off uint64) (string, bool) {
+	k := pidKey{Pid:pid, Ns: ns}
+
+	fInfo, ok := pidMap[k]
+	if !ok {
+		slog.Warn("Can't find pid info for cuda", "pid", pid, "ns", ns)
+		return "", false
+	}
+	syms, ok := symbolsMap[fInfo]
+	if !ok {
+		slog.Warn("Can't find symbols for ino", "ino", fInfo)
+		return "", false
+	}
+
+	sym, ok := syms[off]
+	return sym, ok
+}
+
+func ReadGPUKernelLaunchIntoSpan(record *ringbuf.Record) (request.Span, bool, error) {
 	var event GPUKernelLaunchInfo
 	if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
 		return request.Span{}, true, err
@@ -23,17 +69,8 @@ func ReadGPUKernelLaunchIntoSpan(record *ringbuf.Record, fileInfo *exec.FileInfo
 	// Log the GPU Kernel Launch event
 	slog.Debug("GPU Kernel Launch", "event", event)
 
-	if fileInfo == nil || fileInfo.ELF == nil {
-		return request.Span{}, true, errors.New("no ELF file information available")
-	}
-
-	symAddr, err := FindSymbolAddresses(fileInfo.ELF)
-	if err != nil {
-		return request.Span{}, true, fmt.Errorf("failed to find symbol addresses: %w", err)
-	}
-
 	// Find the symbol for the kernel launch
-	symbol, ok := symAddr[event.KernFuncOff]
+	symbol, ok := symForAddr(int32(event.PidInfo.UserPid), event.PidInfo.Ns, event.KernFuncOff)
 	if !ok {
 		return request.Span{}, true, fmt.Errorf("failed to find symbol for kernel launch at address %d", event.KernFuncOff)
 	}

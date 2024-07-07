@@ -11,7 +11,6 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
 
-	"github.com/grafana/beyla/pkg/internal/exec"
 	"github.com/grafana/beyla/pkg/internal/imetrics"
 	"github.com/grafana/beyla/pkg/internal/request"
 )
@@ -38,8 +37,7 @@ type ringBufForwarder struct {
 	spansLen   int
 	access     sync.Mutex
 	ticker     *time.Ticker
-	fileInfo   *exec.FileInfo
-	reader     func(*ringbuf.Record, ServiceFilter, *exec.FileInfo) (request.Span, bool, error)
+	reader     func(*ringbuf.Record, ServiceFilter) (request.Span, bool, error)
 	// filter the input spans, eliminating these from processes whose PID
 	// belong to a process that does not match the discovery policies
 	filter  ServiceFilter
@@ -57,7 +55,6 @@ func SharedRingbuf(
 	filter ServiceFilter,
 	ringbuffer *ebpf.Map,
 	metrics imetrics.Reporter,
-	fileInfo *exec.FileInfo,
 ) func(context.Context, []io.Closer, chan<- []request.Span) {
 	singleRbfLock.Lock()
 	defer singleRbfLock.Unlock()
@@ -68,7 +65,7 @@ func SharedRingbuf(
 
 	log := slog.With("component", "ringbuf.Tracer")
 	rbf := ringBufForwarder{
-		cfg: cfg, logger: log, ringbuffer: ringbuffer, fileInfo: fileInfo,
+		cfg: cfg, logger: log, ringbuffer: ringbuffer,
 		closers: nil, reader: ReadHTTPRequestTraceAsSpan,
 		filter: filter, metrics: metrics,
 	}
@@ -80,7 +77,7 @@ func ForwardRingbuf(
 	cfg *TracerConfig,
 	ringbuffer *ebpf.Map,
 	filter ServiceFilter,
-	reader func(*ringbuf.Record, ServiceFilter, *exec.FileInfo) (request.Span, bool, error),
+	reader func(*ringbuf.Record, ServiceFilter) (request.Span, bool, error),
 	logger *slog.Logger,
 	metrics imetrics.Reporter,
 	closers ...io.Closer,
@@ -173,7 +170,7 @@ func (rbf *ringBufForwarder) alreadyForwarded(ctx context.Context, _ []io.Closer
 func (rbf *ringBufForwarder) processAndForward(record ringbuf.Record, spansChan chan<- []request.Span) {
 	rbf.access.Lock()
 	defer rbf.access.Unlock()
-	s, ignore, err := rbf.reader(&record, rbf.filter, rbf.fileInfo)
+	s, ignore, err := rbf.reader(&record, rbf.filter)
 	if err != nil {
 		rbf.logger.Error("error parsing perf event", err)
 		return

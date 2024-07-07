@@ -20,7 +20,7 @@ typedef uint64_t stack_trace_t[MAX_STACK_DEPTH];
 // This is the struct that will be serialized on the ring buffer and sent to user space
 typedef struct gpu_kernel_launch {
   u8 flags; // Must be first, we use it to tell what kind of packet we have on the ring buffer
-  int pid, ppid;
+  pid_info pid_info;
   char comm[TASK_COMM_LEN];
   uint64_t kern_func_off;
   int grid_x, grid_y, grid_z;

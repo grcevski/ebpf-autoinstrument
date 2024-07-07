@@ -140,7 +140,6 @@ func (p *Tracer) Run(ctx context.Context, eventsChan chan<- []request.Span) {
 		p.pidsFilter,
 		p.bpfObjects.Events,
 		p.metrics,
-		nil,
 	)(ctx, append(p.closers, &p.bpfObjects), eventsChan)
 }
 
@@ -172,6 +171,5 @@ func (p *ShopifyKafkaTracer) Run(ctx context.Context, eventsChan chan<- []reques
 		p.pidsFilter,
 		p.bpfObjects.Events,
 		p.metrics,
-		nil,
 	)(ctx, append(p.closers, &p.bpfObjects), eventsChan)
 }
