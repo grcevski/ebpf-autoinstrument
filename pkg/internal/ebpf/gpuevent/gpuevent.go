@@ -105,7 +105,7 @@ func (p *Tracer) Tracepoints() map[string]ebpfcommon.FunctionPrograms {
 func (p *Tracer) UProbes() map[string]map[string]ebpfcommon.FunctionPrograms {
 	return map[string]map[string]ebpfcommon.FunctionPrograms{
 		"libcuda.so": {
-			"cudaLaunchKernel": {
+			"cuLaunchKernel": {
 				Required: true,
 				Start:    p.bpfObjects.HandleCudaLaunch,
 			},
