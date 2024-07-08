@@ -12,6 +12,7 @@ import (
 
 	"github.com/grafana/beyla/pkg/internal/exec"
 	"github.com/grafana/beyla/pkg/internal/request"
+	"github.com/ianlancetaylor/demangle"
 )
 
 type pidKey struct {
@@ -33,13 +34,42 @@ func ProcessCudaFileInfo(info *exec.FileInfo) {
 		return
 	}
 
-	symAddr, err := FindSymbolAddresses(info.ELF)
+	base, err := execBase(info)
+	if err != nil {
+		slog.Error("Error finding base map image", "error", err)
+		return
+	}
+
+	symAddr, err := FindSymbolAddresses(base, info.ELF)
 	if err != nil {
 		slog.Error("failed to find symbol addresses", "error", err)
 		return
 	}
 
+
 	symbolsMap[info.Ino] = symAddr
+}
+
+func symToName(sym string) string {
+	if cleanName, err := demangle.ToString(sym); err == nil {
+		return cleanName
+	}
+
+	return sym
+}
+
+func execBase(fileInfo *exec.FileInfo) (uint64, error) {
+	maps, err := exec.FindLibMaps(fileInfo.Pid)
+	if err != nil {
+		return 0, err
+	}
+
+	baseMap := exec.LibExecPath(fileInfo.CmdExePath, maps)
+	if baseMap == nil {
+		return 0, errors.New("Can't find executable in maps, this is a bug.")
+	}
+
+	return uint64(baseMap.StartAddr), nil
 }
 
 func symForAddr(pid int32, ns uint32, off uint64) (string, bool) {
@@ -75,20 +105,23 @@ func ReadGPUKernelLaunchIntoSpan(record *ringbuf.Record) (request.Span, bool, er
 		return request.Span{}, true, fmt.Errorf("failed to find symbol for kernel launch at address %d", event.KernFuncOff)
 	}
 
+	slog.Info("GPU event", "cudaKernel", symToName(symbol))
+
 	return request.Span{
 		Type:   request.EventTypeGPUKernelLaunch,
 		Method: symbol,
 	}, false, nil
 }
 
-func collectSymbols(f *elf.File, syms []elf.Symbol, addressToName map[uint64]string) {
+func collectSymbols(base uint64, f *elf.File, syms []elf.Symbol, addressToName map[uint64]string) {
 	for _, s := range syms {
 		if elf.ST_TYPE(s.Info) != elf.STT_FUNC {
 			// Symbol not associated with a function or other executable code.
 			continue
 		}
 
-		address := s.Value
+		address := base + s.Value
+		//fmt.Printf("Name: %s, address: %d\n", s.Name, address)
 		// Loop over ELF segments.
 		for _, prog := range f.Progs {
 			// Skip uninteresting segments.
@@ -97,7 +130,8 @@ func collectSymbols(f *elf.File, syms []elf.Symbol, addressToName map[uint64]str
 			}
 
 			if prog.Vaddr <= s.Value && s.Value < (prog.Vaddr+prog.Memsz) {
-				address = s.Value - prog.Vaddr + prog.Off
+				address = base + s.Value - prog.Vaddr
+				//fmt.Printf("\t->Name: %s, address: %d, vaddr: %d\n", s.Name, address, prog.Vaddr)
 				break
 			}
 		}
@@ -106,21 +140,21 @@ func collectSymbols(f *elf.File, syms []elf.Symbol, addressToName map[uint64]str
 }
 
 // returns a map of symbol addresses to names
-func FindSymbolAddresses(f *elf.File) (map[uint64]string, error) {
+func FindSymbolAddresses(base uint64, f *elf.File) (map[uint64]string, error) {
 	addressToName := map[uint64]string{}
 	syms, err := f.Symbols()
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, err
 	}
 
-	collectSymbols(f, syms, addressToName)
+	collectSymbols(base, f, syms, addressToName)
 
 	dynsyms, err := f.DynamicSymbols()
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, err
 	}
 
-	collectSymbols(f, dynsyms, addressToName)
+	collectSymbols(base, f, dynsyms, addressToName)
 
 	return addressToName, nil
 }
