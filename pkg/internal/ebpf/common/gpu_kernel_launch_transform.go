@@ -29,10 +29,36 @@ func ProcessCudaFileInfo(info *exec.FileInfo) {
 		return
 	}
 
-	symAddr, err := FindSymbolAddresses(info.ELF)
+	maps, err := exec.FindLibMaps(int32(info.Pid))
 	if err != nil {
-		slog.Error("failed to find symbol addresses", "error", err)
+		slog.Error("failed to find pid maps", "error", err)
 		return
+	}
+
+	var symAddr map[int64]string
+
+	cudaMap := exec.LibExecPath("libtorch_cuda.so", maps)
+
+	if cudaMap != nil {
+		instrPath := fmt.Sprintf("/proc/%d/map_files/%x-%x", info.Pid, cudaMap.StartAddr, cudaMap.EndAddr)
+
+		var ELF *elf.File
+
+		if ELF, err = elf.Open(instrPath); err != nil {
+			slog.Error("can't open ELF file in", "file", instrPath, "error", err)
+		}
+	
+		symAddr, err = FindSymbolAddresses(ELF)
+		if err != nil {
+			slog.Error("failed to find symbol addresses", "error", err)
+			return
+		}
+	} else {
+		symAddr, err = FindSymbolAddresses(info.ELF)
+		if err != nil {
+			slog.Error("failed to find symbol addresses", "error", err)
+			return
+		}
 	}
 
 	slog.Info("Processing cuda symbol map for", "inode", info.Ino)
@@ -83,9 +109,13 @@ func execBase(pid uint32, fi *exec.FileInfo) (uint64, error) {
 		return 0, err
 	}
 
-	baseMap := exec.LibExecPath(fi.CmdExePath, maps)
+	baseMap := exec.LibExecPath("libtorch_cuda.so", maps)
 	if baseMap == nil {
-		return 0, errors.New("Can't find executable in maps, this is a bug.")
+		slog.Info("can't find libtorch_cuda.so in maps")
+		baseMap = exec.LibExecPath(fi.CmdExePath, maps)
+		if baseMap == nil {
+			return 0, errors.New("Can't find executable in maps, this is a bug.")
+		}
 	}
 
 	return uint64(baseMap.StartAddr), nil

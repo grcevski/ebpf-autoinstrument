@@ -112,7 +112,7 @@ func (p *Tracer) UProbes() map[string]map[string]ebpfcommon.FunctionPrograms {
 	return map[string]map[string]ebpfcommon.FunctionPrograms{
 		"libcudart.so": {
 			"cudaLaunchKernel": {
-				Required: true,
+				Required: false,
 				Start:    p.bpfObjects.HandleCudaLaunch,
 			},
 		},
