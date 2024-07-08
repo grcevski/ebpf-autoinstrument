@@ -47,13 +47,14 @@ func getDefinitions(groups AttrGroups) map[Section]AttrReportGroup {
 			attr.ServiceNamespace: true,
 		},
 	}
-	// ServiceName is reported both as resource and metrics attribute, as
-	// the OTEL definition requires that it is reported as resource attribute
-	// but Grafana Cloud takes int from the metric
+	// ServiceName and ServiceNamespace are reported both as resource and metric attributes, as
+	// the OTEL definition requires that it is reported as resource attribute,
+	// but Grafana Cloud takes it from the metric
 	var appAttributes = AttrReportGroup{
 		SubGroups: []*AttrReportGroup{&prometheusAttributes},
 		Attributes: map[attr.Name]Default{
-			attr.ServiceName: true,
+			attr.ServiceName:      true,
+			attr.ServiceNamespace: true,
 		},
 	}
 
@@ -104,6 +105,7 @@ func getDefinitions(groups AttrGroups) map[Section]AttrReportGroup {
 			attr.K8sNodeName:        true,
 			attr.K8sPodUID:          true,
 			attr.K8sPodStartTime:    true,
+			attr.K8sClusterName:     true,
 		},
 	}
 
@@ -121,19 +123,19 @@ func getDefinitions(groups AttrGroups) map[Section]AttrReportGroup {
 	}
 	var httpClientInfo = AttrReportGroup{
 		Attributes: map[attr.Name]Default{
-			attr.ServerAddr: Default(peerInfoEnabled),
-			attr.ServerPort: Default(peerInfoEnabled),
+			attr.ServerAddr: true,
+			attr.ServerPort: true,
 		},
 	}
 	var grpcClientInfo = AttrReportGroup{
 		Attributes: map[attr.Name]Default{
-			attr.ServerAddr: Default(peerInfoEnabled),
+			attr.ServerAddr: true,
 		},
 	}
 
 	// TODO Beyla 2.0 remove
 	// this just defaults the path as default when the target report is enabled
-	// via the deprecated BEYLA_METRICS_REPORT_PEER config option
+	// via the deprecated BEYLA_METRICS_REPORT_TARGET config option
 	var deprecatedHTTPPath = AttrReportGroup{
 		Disabled: !groups.Has(GroupTarget),
 		Attributes: map[attr.Name]Default{
@@ -150,8 +152,18 @@ func getDefinitions(groups AttrGroups) map[Section]AttrReportGroup {
 		},
 	}
 
+	// TODO: populate it with host resource attributes in https://opentelemetry.io/docs/specs/semconv/resource/host/
+	var hostAttributes = AttrReportGroup{
+		Attributes: map[attr.Name]Default{
+			attr.HostName: true,
+		},
+	}
+
 	var processAttributes = AttrReportGroup{
-		SubGroups: []*AttrReportGroup{&appKubeAttributes},
+		SubGroups: []*AttrReportGroup{&appKubeAttributes, &hostAttributes},
+		// TODO: attributes below are resource-level, but in App O11y we don't treat processes as resources,
+		// but applications. Let's first consider how to match processes and Applications before marking this spec
+		// as stable
 		Attributes: map[attr.Name]Default{
 			attr.ProcCommand:     true,
 			attr.ProcCPUState:    true,
@@ -164,6 +176,14 @@ func getDefinitions(groups AttrGroups) map[Section]AttrReportGroup {
 			attr.ProcCommandArgs: false,
 			attr.ProcExecName:    false,
 			attr.ProcExecPath:    false,
+		},
+	}
+
+	var messagingAttributes = AttrReportGroup{
+		SubGroups: []*AttrReportGroup{&appAttributes, &appKubeAttributes},
+		Attributes: map[attr.Name]Default{
+			attr.MessagingSystem:      true,
+			attr.MessagingDestination: true,
 		},
 	}
 
@@ -223,18 +243,10 @@ func getDefinitions(groups AttrGroups) map[Section]AttrReportGroup {
 			},
 		},
 		MessagingPublishDuration.Section: {
-			SubGroups: []*AttrReportGroup{&appAttributes, &appKubeAttributes},
-			Attributes: map[attr.Name]Default{
-				attr.MessagingSystem:      true,
-				attr.MessagingDestination: true,
-			},
+			SubGroups: []*AttrReportGroup{&messagingAttributes},
 		},
 		MessagingProcessDuration.Section: {
-			SubGroups: []*AttrReportGroup{&appAttributes, &appKubeAttributes},
-			Attributes: map[attr.Name]Default{
-				attr.MessagingSystem:      true,
-				attr.MessagingDestination: true,
-			},
+			SubGroups: []*AttrReportGroup{&messagingAttributes},
 		},
 		Traces.Section: {
 			Attributes: map[attr.Name]Default{

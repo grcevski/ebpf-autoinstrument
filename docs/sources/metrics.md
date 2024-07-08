@@ -53,6 +53,7 @@ In order to configure which attributes to show or which attributes to hide, chec
 | Application (all)              | `k8s.pod.uid`               | shown if `attributes.kubernetes.enable`       |
 | Application (all)              | `k8s.replicaset.name`       | shown if `attributes.kubernetes.enable`       |
 | Application (all)              | `k8s.statefulset.name`      | shown if `attributes.kubernetes.enable`       |
+| Application (all)              | `k8s.cluster.name`          | shown if `attributes.kubernetes.enable`       |
 | Application (all)              | `service.name`              | shown                                         | 
 | Application (all)              | `service.namespace`         | shown                                         | 
 | Application (all)              | `target.instance`           | shown                                         |
@@ -110,3 +111,4 @@ Beyla can be [configured to report internal metrics]({{< relref "./configure/opt
 | `beyla_otel_trace_export_errors_total` | CounterVec | Error count on each failed OTEL trace export, by error type                              |
 | `beyla_prometheus_http_requests_total` | CounterVec | Number of requests towards the Prometheus Scrape endpoint, faceted by HTTP port and path |
 | `beyla_instrumented_processes`        | GaugeVec    | Instrumented processes by Beyla, with process name                                       |
+| `beyla_build_info`                    | GaugeVec    | Version information of the Beyla binary, including the build time and commit hash        |

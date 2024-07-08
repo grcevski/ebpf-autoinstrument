@@ -12,6 +12,18 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type bpfCallProtocolArgsT struct {
+	PidConn    bpfPidConnectionInfoT
+	SmallBuf   [24]uint8
+	U_buf      uint64
+	BytesLen   int32
+	Ssl        uint8
+	Direction  uint8
+	OrigDport  uint16
+	PacketType uint8
+	_          [7]byte
+}
+
 type bpfConnectionInfoT struct {
 	S_addr [16]uint8
 	D_addr [16]uint8
@@ -88,6 +100,9 @@ type bpfHttpInfoT struct {
 		Flags    uint8
 		_        [7]byte
 	}
+	ExtraId uint64
+	TaskTid uint32
+	_       [4]byte
 }
 
 type bpfPidConnectionInfoT struct {
@@ -107,9 +122,8 @@ type bpfSslArgsT struct {
 }
 
 type bpfSslPidConnectionInfoT struct {
-	Conn      bpfPidConnectionInfoT
+	P_conn    bpfPidConnectionInfoT
 	OrigDport uint16
-	C_tid     bpfPidKeyT
 	_         [2]byte
 }
 
@@ -156,6 +170,11 @@ type bpfTpInfoPidT struct {
 	_     [3]byte
 }
 
+type bpfTraceKeyT struct {
+	P_key   bpfPidKeyT
+	ExtraId uint64
+}
+
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -197,6 +216,9 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
+	ProtocolHttp            *ebpf.ProgramSpec `ebpf:"protocol_http"`
+	ProtocolHttp2           *ebpf.ProgramSpec `ebpf:"protocol_http2"`
+	ProtocolTcp             *ebpf.ProgramSpec `ebpf:"protocol_tcp"`
 	UprobeSslDoHandshake    *ebpf.ProgramSpec `ebpf:"uprobe_ssl_do_handshake"`
 	UprobeSslRead           *ebpf.ProgramSpec `ebpf:"uprobe_ssl_read"`
 	UprobeSslReadEx         *ebpf.ProgramSpec `ebpf:"uprobe_ssl_read_ex"`
@@ -214,6 +236,7 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
+	ActiveNodejsIds         *ebpf.MapSpec `ebpf:"active_nodejs_ids"`
 	ActiveSslConnections    *ebpf.MapSpec `ebpf:"active_ssl_connections"`
 	ActiveSslHandshakes     *ebpf.MapSpec `ebpf:"active_ssl_handshakes"`
 	ActiveSslReadArgs       *ebpf.MapSpec `ebpf:"active_ssl_read_args"`
@@ -221,9 +244,11 @@ type bpfMapSpecs struct {
 	CloneMap                *ebpf.MapSpec `ebpf:"clone_map"`
 	ConnectionMetaMem       *ebpf.MapSpec `ebpf:"connection_meta_mem"`
 	Events                  *ebpf.MapSpec `ebpf:"events"`
-	FilteredConnections     *ebpf.MapSpec `ebpf:"filtered_connections"`
 	Http2InfoMem            *ebpf.MapSpec `ebpf:"http2_info_mem"`
 	HttpInfoMem             *ebpf.MapSpec `ebpf:"http_info_mem"`
+	IovecMem                *ebpf.MapSpec `ebpf:"iovec_mem"`
+	JumpTable               *ebpf.MapSpec `ebpf:"jump_table"`
+	NodejsParentMap         *ebpf.MapSpec `ebpf:"nodejs_parent_map"`
 	OngoingHttp             *ebpf.MapSpec `ebpf:"ongoing_http"`
 	OngoingHttp2Connections *ebpf.MapSpec `ebpf:"ongoing_http2_connections"`
 	OngoingHttp2Grpc        *ebpf.MapSpec `ebpf:"ongoing_http2_grpc"`
@@ -231,6 +256,7 @@ type bpfMapSpecs struct {
 	OngoingTcpReq           *ebpf.MapSpec `ebpf:"ongoing_tcp_req"`
 	PidCache                *ebpf.MapSpec `ebpf:"pid_cache"`
 	PidTidToConn            *ebpf.MapSpec `ebpf:"pid_tid_to_conn"`
+	ProtocolArgsMem         *ebpf.MapSpec `ebpf:"protocol_args_mem"`
 	ServerTraces            *ebpf.MapSpec `ebpf:"server_traces"`
 	SslToConn               *ebpf.MapSpec `ebpf:"ssl_to_conn"`
 	SslToPidTid             *ebpf.MapSpec `ebpf:"ssl_to_pid_tid"`
@@ -260,6 +286,7 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
+	ActiveNodejsIds         *ebpf.Map `ebpf:"active_nodejs_ids"`
 	ActiveSslConnections    *ebpf.Map `ebpf:"active_ssl_connections"`
 	ActiveSslHandshakes     *ebpf.Map `ebpf:"active_ssl_handshakes"`
 	ActiveSslReadArgs       *ebpf.Map `ebpf:"active_ssl_read_args"`
@@ -267,9 +294,11 @@ type bpfMaps struct {
 	CloneMap                *ebpf.Map `ebpf:"clone_map"`
 	ConnectionMetaMem       *ebpf.Map `ebpf:"connection_meta_mem"`
 	Events                  *ebpf.Map `ebpf:"events"`
-	FilteredConnections     *ebpf.Map `ebpf:"filtered_connections"`
 	Http2InfoMem            *ebpf.Map `ebpf:"http2_info_mem"`
 	HttpInfoMem             *ebpf.Map `ebpf:"http_info_mem"`
+	IovecMem                *ebpf.Map `ebpf:"iovec_mem"`
+	JumpTable               *ebpf.Map `ebpf:"jump_table"`
+	NodejsParentMap         *ebpf.Map `ebpf:"nodejs_parent_map"`
 	OngoingHttp             *ebpf.Map `ebpf:"ongoing_http"`
 	OngoingHttp2Connections *ebpf.Map `ebpf:"ongoing_http2_connections"`
 	OngoingHttp2Grpc        *ebpf.Map `ebpf:"ongoing_http2_grpc"`
@@ -277,6 +306,7 @@ type bpfMaps struct {
 	OngoingTcpReq           *ebpf.Map `ebpf:"ongoing_tcp_req"`
 	PidCache                *ebpf.Map `ebpf:"pid_cache"`
 	PidTidToConn            *ebpf.Map `ebpf:"pid_tid_to_conn"`
+	ProtocolArgsMem         *ebpf.Map `ebpf:"protocol_args_mem"`
 	ServerTraces            *ebpf.Map `ebpf:"server_traces"`
 	SslToConn               *ebpf.Map `ebpf:"ssl_to_conn"`
 	SslToPidTid             *ebpf.Map `ebpf:"ssl_to_pid_tid"`
@@ -289,6 +319,7 @@ type bpfMaps struct {
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
+		m.ActiveNodejsIds,
 		m.ActiveSslConnections,
 		m.ActiveSslHandshakes,
 		m.ActiveSslReadArgs,
@@ -296,9 +327,11 @@ func (m *bpfMaps) Close() error {
 		m.CloneMap,
 		m.ConnectionMetaMem,
 		m.Events,
-		m.FilteredConnections,
 		m.Http2InfoMem,
 		m.HttpInfoMem,
+		m.IovecMem,
+		m.JumpTable,
+		m.NodejsParentMap,
 		m.OngoingHttp,
 		m.OngoingHttp2Connections,
 		m.OngoingHttp2Grpc,
@@ -306,6 +339,7 @@ func (m *bpfMaps) Close() error {
 		m.OngoingTcpReq,
 		m.PidCache,
 		m.PidTidToConn,
+		m.ProtocolArgsMem,
 		m.ServerTraces,
 		m.SslToConn,
 		m.SslToPidTid,
@@ -321,6 +355,9 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
+	ProtocolHttp            *ebpf.Program `ebpf:"protocol_http"`
+	ProtocolHttp2           *ebpf.Program `ebpf:"protocol_http2"`
+	ProtocolTcp             *ebpf.Program `ebpf:"protocol_tcp"`
 	UprobeSslDoHandshake    *ebpf.Program `ebpf:"uprobe_ssl_do_handshake"`
 	UprobeSslRead           *ebpf.Program `ebpf:"uprobe_ssl_read"`
 	UprobeSslReadEx         *ebpf.Program `ebpf:"uprobe_ssl_read_ex"`
@@ -336,6 +373,9 @@ type bpfPrograms struct {
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
+		p.ProtocolHttp,
+		p.ProtocolHttp2,
+		p.ProtocolTcp,
 		p.UprobeSslDoHandshake,
 		p.UprobeSslRead,
 		p.UprobeSslReadEx,

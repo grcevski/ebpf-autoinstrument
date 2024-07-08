@@ -1,7 +1,7 @@
 package svc
 
 import (
-	semconv "go.opentelemetry.io/otel/semconv/v1.19.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
 
 	attr "github.com/grafana/beyla/pkg/internal/export/attributes/names"
 )
@@ -17,6 +17,7 @@ const (
 	InstrumentableNodejs
 	InstrumentableRust
 	InstrumentableGeneric
+	InstrumentablePHP
 )
 
 func (it InstrumentableType) String() string {
@@ -34,7 +35,9 @@ func (it InstrumentableType) String() string {
 	case InstrumentableNodejs:
 		return semconv.TelemetrySDKLanguageNodejs.Value.AsString()
 	case InstrumentableRust:
-		return "rust"
+		return semconv.TelemetrySDKLanguageRust.Value.AsString()
+	case InstrumentablePHP:
+		return semconv.TelemetrySDKLanguagePHP.Value.AsString()
 	case InstrumentableGeneric:
 		return "generic"
 	default:
@@ -69,6 +72,10 @@ type ID struct {
 	// It is stored here at process discovery time, because it might differ form the
 	// UserPID and HostPID fields of the request.PidInfo struct.
 	ProcPID int32
+
+	// HostName running the process. It will default to the Beyla host and will be overridden
+	// by other metadata if available (e.g., Pod Name, Node Name, etc...)
+	HostName string
 }
 
 func (i *ID) String() string {

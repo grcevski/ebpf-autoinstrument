@@ -27,10 +27,9 @@ type NameResolverConfig struct {
 }
 
 type NameResolver struct {
-	cache  *expirable.LRU[string, string]
-	sCache *expirable.LRU[string, svc.ID]
-	cfg    *NameResolverConfig
-	db     *kube2.Database
+	cache *expirable.LRU[string, string]
+	cfg   *NameResolverConfig
+	db    *kube2.Database
 }
 
 func NameResolutionProvider(ctxInfo *global.ContextInfo, cfg *NameResolverConfig) pipe.MiddleProvider[[]request.Span, []request.Span] {
@@ -44,10 +43,9 @@ func NameResolutionProvider(ctxInfo *global.ContextInfo, cfg *NameResolverConfig
 
 func nameResolver(ctxInfo *global.ContextInfo, cfg *NameResolverConfig) (pipe.MiddleFunc[[]request.Span, []request.Span], error) {
 	nr := NameResolver{
-		cfg:    cfg,
-		db:     ctxInfo.AppO11y.K8sDatabase,
-		cache:  expirable.NewLRU[string, string](cfg.CacheLen, nil, cfg.CacheTTL),
-		sCache: expirable.NewLRU[string, svc.ID](cfg.CacheLen, nil, cfg.CacheTTL),
+		cfg:   cfg,
+		db:    ctxInfo.AppO11y.K8sDatabase,
+		cache: expirable.NewLRU[string, string](cfg.CacheLen, nil, cfg.CacheTTL),
 	}
 
 	return func(in <-chan []request.Span, out chan<- []request.Span) {
@@ -76,18 +74,21 @@ func trimPrefixIgnoreCase(s, prefix string) string {
 }
 
 func (nr *NameResolver) resolveNames(span *request.Span) {
+	var hn, pn string
 	if span.IsClientSpan() {
-		span.HostName, span.OtherNamespace = nr.resolve(&span.ServiceID, span.Host)
-		span.PeerName = span.ServiceID.Name
-		if len(span.Peer) > 0 {
-			nr.sCache.Add(span.Peer, span.ServiceID)
-		}
+		hn, span.OtherNamespace = nr.resolve(&span.ServiceID, span.Host)
+		pn, _ = nr.resolve(&span.ServiceID, span.Peer)
 	} else {
-		span.PeerName, span.OtherNamespace = nr.resolve(&span.ServiceID, span.Peer)
-		span.HostName = span.ServiceID.Name
-		if len(span.Host) > 0 {
-			nr.sCache.Add(span.Host, span.ServiceID)
-		}
+		pn, span.OtherNamespace = nr.resolve(&span.ServiceID, span.Peer)
+		hn, _ = nr.resolve(&span.ServiceID, span.Host)
+	}
+	// don't set names if the peer and host names have been already decorated
+	// in a previous stage (e.g. Kubernetes decorator)
+	if pn != "" {
+		span.PeerName = pn
+	}
+	if hn != "" {
+		span.HostName = hn
 	}
 }
 
@@ -95,18 +96,12 @@ func (nr *NameResolver) resolve(svc *svc.ID, ip string) (string, string) {
 	var name, ns string
 
 	if len(ip) > 0 {
-		peerSvc, ok := nr.sCache.Get(ip)
-		if ok {
-			name = peerSvc.Name
-			ns = peerSvc.Namespace
+		var peer string
+		peer, ns = nr.dnsResolve(svc, ip)
+		if len(peer) > 0 {
+			name = peer
 		} else {
-			var peer string
-			peer, ns = nr.dnsResolve(svc, ip)
-			if len(peer) > 0 {
-				name = peer
-			} else {
-				name = ip
-			}
+			name = ip
 		}
 	}
 
@@ -153,18 +148,20 @@ func (nr *NameResolver) dnsResolve(svc *svc.ID, ip string) (string, string) {
 
 	n = nr.cleanName(svc, ip, n)
 
-	// fmt.Printf("%s -> %s\n", ip, n)
-
 	return n, svc.Namespace
 }
 
 func (nr *NameResolver) resolveFromK8s(ip string) (string, string) {
-	info := nr.db.PodInfoForIP(ip)
-	if info == nil {
-		return "", ""
+	svcInfo := nr.db.ServiceInfoForIP(ip)
+	if svcInfo == nil {
+		podInfo := nr.db.PodInfoForIP(ip)
+		if podInfo == nil {
+			return "", ""
+		}
+		return podInfo.ServiceName(), podInfo.Namespace
 	}
 
-	return info.ServiceName(), info.Namespace
+	return svcInfo.Name, svcInfo.Namespace
 }
 
 func (nr *NameResolver) resolveIP(ip string) string {

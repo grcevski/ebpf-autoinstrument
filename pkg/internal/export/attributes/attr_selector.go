@@ -43,47 +43,64 @@ func NewAttrSelector(groups AttrGroups, selectorCfg Selection) (*AttrSelector, e
 	}, nil
 }
 
-// For returns the list of attribute names for a given metric
+// For returns the list of enabled attribute names for a given metric
 func (p *AttrSelector) For(metricName Name) []attr.Name {
-	metricAttributes, ok := p.definition[metricName.Section]
+	attributeNames, ok := p.definition[metricName.Section]
 	if !ok {
 		panic(fmt.Sprintf("BUG! metric not found %+v", metricName))
 	}
-	inclusionLists, ok := p.selector[metricName.Section]
-	if !ok {
+	allInclusionLists := p.selector.Matching(metricName)
+	if len(allInclusionLists) == 0 {
 		// if the user did not provide any selector, return the default attributes for that metric
-		attrs := helpers.SetToSlice(metricAttributes.Default())
+		attrs := helpers.SetToSlice(attributeNames.Default())
 		slices.Sort(attrs)
 		return attrs
 	}
-	var addAttributes map[attr.Name]struct{}
-	// if the "include" list is empty, we use the default attributes
-	// as included
-	if len(inclusionLists.Include) == 0 {
-		addAttributes = metricAttributes.Default()
-	} else {
-		addAttributes = map[attr.Name]struct{}{}
-		for attrName := range metricAttributes.All() {
-			if inclusionLists.includes(attrName) {
-				addAttributes[attrName] = struct{}{}
-			}
+	matchingAttrs := map[attr.Name]struct{}{}
+	for i, il := range allInclusionLists {
+		p.addIncludedAttributes(matchingAttrs, attributeNames, il)
+		// if the "include" lists are empty in the first iteration, we use the default attributes
+		// as included
+		if i == 0 && len(matchingAttrs) == 0 {
+			matchingAttrs = attributeNames.Default()
+		}
+		// now remove any attribute specified in the "exclude" lists
+		p.rmExcludedAttributes(matchingAttrs, il)
+	}
+
+	sas := helpers.SetToSlice(matchingAttrs)
+	slices.Sort(sas)
+	return sas
+}
+
+// returns if the inclusion list have contents or not
+// this will be useful to decide whether to use the default
+// attribute set or not
+func (p *AttrSelector) addIncludedAttributes(
+	matchingAttrs map[attr.Name]struct{},
+	attributeNames AttrReportGroup,
+	inclusionLists InclusionLists,
+) {
+	allAttributes := attributeNames.All()
+	for attrName := range allAttributes {
+		if inclusionLists.includes(attrName) {
+			matchingAttrs[attrName] = struct{}{}
 		}
 	}
-	// now remove any attribute specified in the "exclude" list
-	maps.DeleteFunc(addAttributes, func(attr attr.Name, _ struct{}) bool {
+}
+
+func (p *AttrSelector) rmExcludedAttributes(matchingAttrs map[attr.Name]struct{}, inclusionLists InclusionLists) {
+	maps.DeleteFunc(matchingAttrs, func(attr attr.Name, _ struct{}) bool {
 		return inclusionLists.excludes(attr)
 	})
-	attrs := helpers.SetToSlice(addAttributes)
-	slices.Sort(attrs)
-	return attrs
 }
 
 // All te attributes for this group and their subgroups, unless they are disabled.
 func (p *AttrReportGroup) All() map[attr.Name]struct{} {
-	if p.Disabled {
-		return map[attr.Name]struct{}{}
-	}
 	attrs := map[attr.Name]struct{}{}
+	if p.Disabled {
+		return attrs
+	}
 	for _, parent := range p.SubGroups {
 		maps.Copy(attrs, parent.All())
 	}
@@ -95,10 +112,10 @@ func (p *AttrReportGroup) All() map[attr.Name]struct{} {
 
 // Default attributes for this group and their subgroups, unless they are disabled.
 func (p *AttrReportGroup) Default() map[attr.Name]struct{} {
-	if p.Disabled {
-		return map[attr.Name]struct{}{}
-	}
 	attrs := map[attr.Name]struct{}{}
+	if p.Disabled {
+		return attrs
+	}
 	for _, parent := range p.SubGroups {
 		maps.Copy(attrs, parent.Default())
 	}

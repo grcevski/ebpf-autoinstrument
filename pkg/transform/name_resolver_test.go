@@ -31,22 +31,22 @@ func TestSuffixPrefix(t *testing.T) {
 	assert.Equal(t, "superDuper", trimPrefixIgnoreCase("superDuper", ""))
 }
 
-func TestResolveFromK8s(t *testing.T) {
+func TestResolvePodsFromK8s(t *testing.T) {
 	db := kube.CreateDatabase(nil)
 
 	pod1 := kube2.PodInfo{
 		ObjectMeta: metav1.ObjectMeta{Name: "pod1"},
-		IPs:        []string{"10.0.0.1", "10.1.0.1"},
+		IPInfo:     kube2.IPInfo{IPs: []string{"10.0.0.1", "10.1.0.1"}},
 	}
 
 	pod2 := kube2.PodInfo{
 		ObjectMeta: metav1.ObjectMeta{Name: "pod2", Namespace: "something"},
-		IPs:        []string{"10.0.0.2", "10.1.0.2"},
+		IPInfo:     kube2.IPInfo{IPs: []string{"10.0.0.2", "10.1.0.2"}},
 	}
 
 	pod3 := kube2.PodInfo{
 		ObjectMeta: metav1.ObjectMeta{Name: "pod3"},
-		IPs:        []string{"10.0.0.3", "10.1.0.3"},
+		IPInfo:     kube2.IPInfo{IPs: []string{"10.0.0.3", "10.1.0.3"}},
 	}
 
 	db.UpdateNewPodsByIPIndex(&pod1)
@@ -62,9 +62,90 @@ func TestResolveFromK8s(t *testing.T) {
 	assert.Nil(t, db.PodInfoForIP("10.1.0.3"))
 
 	nr := NameResolver{
-		db:     &db,
-		cache:  expirable.NewLRU[string, string](10, nil, 5*time.Hour),
-		sCache: expirable.NewLRU[string, svc.ID](10, nil, 5*time.Hour),
+		db:    &db,
+		cache: expirable.NewLRU[string, string](10, nil, 5*time.Hour),
+	}
+
+	name, namespace := nr.resolveFromK8s("10.0.0.1")
+	assert.Equal(t, "pod1", name)
+	assert.Equal(t, "", namespace)
+
+	name, namespace = nr.resolveFromK8s("10.0.0.2")
+	assert.Equal(t, "pod2", name)
+	assert.Equal(t, "something", namespace)
+
+	name, namespace = nr.resolveFromK8s("10.0.0.3")
+	assert.Equal(t, "", name)
+	assert.Equal(t, "", namespace)
+
+	clientSpan := request.Span{
+		Type: request.EventTypeHTTPClient,
+		Peer: "10.0.0.1",
+		Host: "10.0.0.2",
+		ServiceID: svc.ID{
+			Name:      "pod1",
+			Namespace: "",
+		},
+	}
+
+	serverSpan := request.Span{
+		Type: request.EventTypeHTTP,
+		Peer: "10.0.0.1",
+		Host: "10.0.0.2",
+		ServiceID: svc.ID{
+			Name:      "pod2",
+			Namespace: "something",
+		},
+	}
+
+	nr.resolveNames(&clientSpan)
+
+	assert.Equal(t, "pod1", clientSpan.PeerName)
+	assert.Equal(t, "", clientSpan.ServiceID.Namespace)
+	assert.Equal(t, "pod2", clientSpan.HostName)
+	assert.Equal(t, "something", clientSpan.OtherNamespace)
+
+	nr.resolveNames(&serverSpan)
+
+	assert.Equal(t, "pod1", serverSpan.PeerName)
+	assert.Equal(t, "", serverSpan.OtherNamespace)
+	assert.Equal(t, "pod2", serverSpan.HostName)
+	assert.Equal(t, "something", serverSpan.ServiceID.Namespace)
+}
+
+func TestResolveServiceFromK8s(t *testing.T) {
+	db := kube.CreateDatabase(nil)
+
+	svc1 := kube2.ServiceInfo{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod1"},
+		IPInfo:     kube2.IPInfo{IPs: []string{"10.0.0.1", "10.1.0.1"}},
+	}
+
+	svc2 := kube2.ServiceInfo{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod2", Namespace: "something"},
+		IPInfo:     kube2.IPInfo{IPs: []string{"10.0.0.2", "10.1.0.2"}},
+	}
+
+	svc3 := kube2.ServiceInfo{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod3"},
+		IPInfo:     kube2.IPInfo{IPs: []string{"10.0.0.3", "10.1.0.3"}},
+	}
+
+	db.UpdateNewServicesByIPIndex(&svc1)
+	db.UpdateNewServicesByIPIndex(&svc2)
+	db.UpdateNewServicesByIPIndex(&svc3)
+
+	assert.Equal(t, &svc1, db.ServiceInfoForIP("10.0.0.1"))
+	assert.Equal(t, &svc1, db.ServiceInfoForIP("10.1.0.1"))
+	assert.Equal(t, &svc2, db.ServiceInfoForIP("10.0.0.2"))
+	assert.Equal(t, &svc2, db.ServiceInfoForIP("10.1.0.2"))
+	assert.Equal(t, &svc3, db.ServiceInfoForIP("10.1.0.3"))
+	db.UpdateDeletedServicesByIPIndex(&svc3)
+	assert.Nil(t, db.PodInfoForIP("10.1.0.3"))
+
+	nr := NameResolver{
+		db:    &db,
+		cache: expirable.NewLRU[string, string](10, nil, 5*time.Hour),
 	}
 
 	name, namespace := nr.resolveFromK8s("10.0.0.1")

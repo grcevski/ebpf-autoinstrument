@@ -5,6 +5,7 @@ package k8s
 import (
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -111,6 +112,7 @@ func FeatureHTTPMetricsDecoration(manifest string) features.Feature {
 				"k8s_node_name":      ".+-control-plane$",
 				"k8s_pod_uid":        UUIDRegex,
 				"k8s_pod_start_time": TimeRegex,
+				"k8s_cluster_name":   "^beyla$",
 			}, "k8s_deployment_name")).
 		Assess("all the server metrics are properly decorated",
 			testMetricsDecoration(httpServerMetrics, `{url_path="/iping",k8s_pod_name=~"testserver-.*"}`, map[string]string{
@@ -120,9 +122,10 @@ func FeatureHTTPMetricsDecoration(manifest string) features.Feature {
 				"k8s_pod_start_time":  TimeRegex,
 				"k8s_deployment_name": "^testserver$",
 				"k8s_replicaset_name": "^testserver-",
+				"k8s_cluster_name":    "^beyla$",
 			})).
 		Assess("all the span graph metrics exist",
-			testMetricsDecoration(spanGraphMetrics, `{connection_type="virtual_node",server="testserver"}`, map[string]string{
+			testMetricsDecoration(spanGraphMetrics, `{server="testserver",client="internal-pinger"}`, map[string]string{
 				"server_service_namespace": "integration-test",
 				"source":                   "beyla",
 			}),
@@ -146,6 +149,7 @@ func FeatureGRPCMetricsDecoration(manifest string) features.Feature {
 				"k8s_node_name":      ".+-control-plane$",
 				"k8s_pod_uid":        UUIDRegex,
 				"k8s_pod_start_time": TimeRegex,
+				"k8s_cluster_name":   "^beyla$",
 			}, "k8s_deployment_name")).
 		Assess("all the server metrics are properly decorated",
 			testMetricsDecoration(grpcServerMetrics, `{k8s_pod_name=~"testserver-.*"}`, map[string]string{
@@ -155,21 +159,54 @@ func FeatureGRPCMetricsDecoration(manifest string) features.Feature {
 				"k8s_pod_start_time":  TimeRegex,
 				"k8s_deployment_name": "^testserver$",
 				"k8s_replicaset_name": "^testserver-",
+				"k8s_cluster_name":    "^beyla$",
 			}),
 		).Feature()
 }
 
-func FeatureProcessMetricsDecoration() features.Feature {
+func FeatureProcessMetricsDecoration(overrideProperties map[string]string) features.Feature {
+	properties := map[string]string{
+		"k8s_namespace_name":  "^default$",
+		"k8s_node_name":       ".+-control-plane$",
+		"k8s_pod_name":        "^testserver-.*",
+		"k8s_pod_uid":         UUIDRegex,
+		"k8s_pod_start_time":  TimeRegex,
+		"k8s_deployment_name": "^testserver$",
+		"k8s_replicaset_name": "^testserver-",
+		"k8s_cluster_name":    "^beyla$",
+	}
+	for k, v := range overrideProperties {
+		properties[k] = v
+	}
 	return features.New("Decoration of process metrics").
 		Assess("all the process metrics from currently instrumented services are properly decorated",
-			testMetricsDecoration(processMetrics, `{k8s_pod_name=~"testserver-.*"}`, map[string]string{
-				"k8s_namespace_name":  "^default$",
-				"k8s_node_name":       ".+-control-plane$",
-				"k8s_pod_uid":         UUIDRegex,
-				"k8s_pod_start_time":  TimeRegex,
-				"k8s_deployment_name": "^testserver$",
-				"k8s_replicaset_name": "^testserver-",
-			})).Feature()
+			testMetricsDecoration(processMetrics, `{k8s_pod_name=~"`+properties["k8s_pod_name"]+`"}`, properties),
+		).Feature()
+}
+
+func FeatureDisableInformersAppMetricsDecoration() features.Feature {
+	pinger := kube.Template[Pinger]{
+		TemplateFile: PingerManifest,
+		Data: Pinger{
+			PodName:   "internal-pinger",
+			TargetURL: "http://testserver:8080/iping",
+		},
+	}
+	return features.New("Disabled informers for App metrics").
+		Setup(pinger.Deploy()).
+		Teardown(pinger.Delete()).
+		Assess("Application metrics miss the attributes coming from the disabled informers",
+			testMetricsDecoration(slices.Concat(processMetrics, httpServerMetrics),
+				`{k8s_pod_name=~"^testserver-.*"}`, map[string]string{
+					"k8s_namespace_name":  "^default$",
+					"k8s_node_name":       ".+-control-plane$",
+					"k8s_pod_name":        "^testserver-.*",
+					"k8s_pod_uid":         UUIDRegex,
+					"k8s_pod_start_time":  TimeRegex,
+					"k8s_deployment_name": "",
+					"k8s_replicaset_name": "^testserver-.*",
+					"k8s_cluster_name":    "^beyla$",
+				})).Feature()
 }
 
 func testMetricsDecoration(

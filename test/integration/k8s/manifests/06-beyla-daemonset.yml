@@ -7,6 +7,10 @@ data:
     attributes:
       kubernetes:
         enable: true
+        cluster_name: beyla
+      select:
+        process_*:
+          include: ["*"]
     print_traces: true
     log_level: debug
     discovery:
@@ -82,3 +86,5 @@ spec:
               value: "true"
             - name: BEYLA_OTEL_METRICS_TTL
               value: "30m0s"
+            - name: BEYLA_OTEL_METRICS_FEATURES
+              value: "application,application_process"

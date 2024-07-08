@@ -16,6 +16,7 @@ import (
 	"github.com/grafana/beyla/pkg/internal/ebpf/httpfltr"
 	"github.com/grafana/beyla/pkg/internal/ebpf/httpssl"
 	"github.com/grafana/beyla/pkg/internal/ebpf/nethttp"
+	"github.com/grafana/beyla/pkg/internal/ebpf/nodejs"
 	"github.com/grafana/beyla/pkg/internal/exec"
 	"github.com/grafana/beyla/pkg/internal/imetrics"
 	"github.com/grafana/beyla/pkg/internal/pipe/global"
@@ -73,11 +74,11 @@ func (pf *ProcessFinder) Start() (<-chan *ebpf.ProcessTracer, <-chan *Instrument
 	gb := pipe.NewBuilder(&nodesMap{}, pipe.ChannelBufferLen(pf.cfg.ChannelBufferLen))
 	pipe.AddStart(gb, processWatcher, ProcessWatcherFunc(pf.ctx, pf.cfg))
 	pipe.AddMiddleProvider(gb, ptrWatcherKubeEnricher,
-		WatcherKubeEnricherProvider(pf.ctxInfo.K8sEnabled, pf.ctxInfo.AppO11y.K8sInformer))
+		WatcherKubeEnricherProvider(pf.ctx, pf.ctxInfo.K8sInformer))
 	pipe.AddMiddleProvider(gb, criteriaMatcher, CriteriaMatcherProvider(pf.cfg))
 	pipe.AddMiddleProvider(gb, execTyper, ExecTyperProvider(pf.cfg, pf.ctxInfo.Metrics))
 	pipe.AddMiddleProvider(gb, containerDBUpdater,
-		ContainerDBUpdaterProvider(pf.ctxInfo.K8sEnabled, pf.ctxInfo.AppO11y.K8sDatabase))
+		ContainerDBUpdaterProvider(pf.ctxInfo.K8sInformer.IsKubeEnabled(), pf.ctxInfo.AppO11y.K8sDatabase))
 	pipe.AddFinalProvider(gb, traceAttacher, TraceAttacherProvider(&TraceAttacher{
 		Cfg:               pf.cfg,
 		Ctx:               pf.ctx,
@@ -114,4 +115,8 @@ func newNonGoTracersGroup(cfg *beyla.Config, metrics imetrics.Reporter, fileInfo
 
 func newNonGoTracersGroupUProbes(cfg *beyla.Config, metrics imetrics.Reporter, fileInfo *exec.FileInfo) []ebpf.Tracer {
 	return []ebpf.Tracer{httpssl.New(cfg, metrics), gpuevent.New(cfg, metrics, fileInfo)}
+}
+
+func newNodeJSTracersGroup(cfg *beyla.Config, metrics imetrics.Reporter) []ebpf.Tracer {
+	return []ebpf.Tracer{nodejs.New(cfg, metrics)}
 }

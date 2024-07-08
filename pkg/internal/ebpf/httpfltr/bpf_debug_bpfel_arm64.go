@@ -12,6 +12,18 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type bpf_debugCallProtocolArgsT struct {
+	PidConn    bpf_debugPidConnectionInfoT
+	SmallBuf   [24]uint8
+	U_buf      uint64
+	BytesLen   int32
+	Ssl        uint8
+	Direction  uint8
+	OrigDport  uint16
+	PacketType uint8
+	_          [7]byte
+}
+
 type bpf_debugConnectionInfoT struct {
 	S_addr [16]uint8
 	D_addr [16]uint8
@@ -88,6 +100,9 @@ type bpf_debugHttpInfoT struct {
 		Flags    uint8
 		_        [7]byte
 	}
+	ExtraId uint64
+	TaskTid uint32
+	_       [4]byte
 }
 
 type bpf_debugPartialConnectionInfoT struct {
@@ -129,9 +144,8 @@ type bpf_debugSslArgsT struct {
 }
 
 type bpf_debugSslPidConnectionInfoT struct {
-	Conn      bpf_debugPidConnectionInfoT
+	P_conn    bpf_debugPidConnectionInfoT
 	OrigDport uint16
-	C_tid     bpf_debugPidKeyT
 	_         [2]byte
 }
 
@@ -176,6 +190,11 @@ type bpf_debugTpInfoPidT struct {
 	Pid   uint32
 	Valid uint8
 	_     [3]byte
+}
+
+type bpf_debugTraceKeyT struct {
+	P_key   bpf_debugPidKeyT
+	ExtraId uint64
 }
 
 // loadBpf_debug returns the embedded CollectionSpec for bpf_debug.
@@ -231,6 +250,9 @@ type bpf_debugProgramSpecs struct {
 	KretprobeSysConnect     *ebpf.ProgramSpec `ebpf:"kretprobe_sys_connect"`
 	KretprobeTcpRecvmsg     *ebpf.ProgramSpec `ebpf:"kretprobe_tcp_recvmsg"`
 	KretprobeTcpSendmsg     *ebpf.ProgramSpec `ebpf:"kretprobe_tcp_sendmsg"`
+	ProtocolHttp            *ebpf.ProgramSpec `ebpf:"protocol_http"`
+	ProtocolHttp2           *ebpf.ProgramSpec `ebpf:"protocol_http2"`
+	ProtocolTcp             *ebpf.ProgramSpec `ebpf:"protocol_tcp"`
 	SocketHttpFilter        *ebpf.ProgramSpec `ebpf:"socket__http_filter"`
 }
 
@@ -240,6 +262,7 @@ type bpf_debugProgramSpecs struct {
 type bpf_debugMapSpecs struct {
 	ActiveAcceptArgs        *ebpf.MapSpec `ebpf:"active_accept_args"`
 	ActiveConnectArgs       *ebpf.MapSpec `ebpf:"active_connect_args"`
+	ActiveNodejsIds         *ebpf.MapSpec `ebpf:"active_nodejs_ids"`
 	ActiveRecvArgs          *ebpf.MapSpec `ebpf:"active_recv_args"`
 	ActiveSendArgs          *ebpf.MapSpec `ebpf:"active_send_args"`
 	ActiveSendSockArgs      *ebpf.MapSpec `ebpf:"active_send_sock_args"`
@@ -249,10 +272,13 @@ type bpf_debugMapSpecs struct {
 	ActiveSslWriteArgs      *ebpf.MapSpec `ebpf:"active_ssl_write_args"`
 	CloneMap                *ebpf.MapSpec `ebpf:"clone_map"`
 	ConnectionMetaMem       *ebpf.MapSpec `ebpf:"connection_meta_mem"`
+	DebugEvents             *ebpf.MapSpec `ebpf:"debug_events"`
 	Events                  *ebpf.MapSpec `ebpf:"events"`
-	FilteredConnections     *ebpf.MapSpec `ebpf:"filtered_connections"`
 	Http2InfoMem            *ebpf.MapSpec `ebpf:"http2_info_mem"`
 	HttpInfoMem             *ebpf.MapSpec `ebpf:"http_info_mem"`
+	IovecMem                *ebpf.MapSpec `ebpf:"iovec_mem"`
+	JumpTable               *ebpf.MapSpec `ebpf:"jump_table"`
+	NodejsParentMap         *ebpf.MapSpec `ebpf:"nodejs_parent_map"`
 	OngoingHttp             *ebpf.MapSpec `ebpf:"ongoing_http"`
 	OngoingHttp2Connections *ebpf.MapSpec `ebpf:"ongoing_http2_connections"`
 	OngoingHttp2Grpc        *ebpf.MapSpec `ebpf:"ongoing_http2_grpc"`
@@ -260,6 +286,7 @@ type bpf_debugMapSpecs struct {
 	OngoingTcpReq           *ebpf.MapSpec `ebpf:"ongoing_tcp_req"`
 	PidCache                *ebpf.MapSpec `ebpf:"pid_cache"`
 	PidTidToConn            *ebpf.MapSpec `ebpf:"pid_tid_to_conn"`
+	ProtocolArgsMem         *ebpf.MapSpec `ebpf:"protocol_args_mem"`
 	ServerTraces            *ebpf.MapSpec `ebpf:"server_traces"`
 	SslToConn               *ebpf.MapSpec `ebpf:"ssl_to_conn"`
 	SslToPidTid             *ebpf.MapSpec `ebpf:"ssl_to_pid_tid"`
@@ -292,6 +319,7 @@ func (o *bpf_debugObjects) Close() error {
 type bpf_debugMaps struct {
 	ActiveAcceptArgs        *ebpf.Map `ebpf:"active_accept_args"`
 	ActiveConnectArgs       *ebpf.Map `ebpf:"active_connect_args"`
+	ActiveNodejsIds         *ebpf.Map `ebpf:"active_nodejs_ids"`
 	ActiveRecvArgs          *ebpf.Map `ebpf:"active_recv_args"`
 	ActiveSendArgs          *ebpf.Map `ebpf:"active_send_args"`
 	ActiveSendSockArgs      *ebpf.Map `ebpf:"active_send_sock_args"`
@@ -301,10 +329,13 @@ type bpf_debugMaps struct {
 	ActiveSslWriteArgs      *ebpf.Map `ebpf:"active_ssl_write_args"`
 	CloneMap                *ebpf.Map `ebpf:"clone_map"`
 	ConnectionMetaMem       *ebpf.Map `ebpf:"connection_meta_mem"`
+	DebugEvents             *ebpf.Map `ebpf:"debug_events"`
 	Events                  *ebpf.Map `ebpf:"events"`
-	FilteredConnections     *ebpf.Map `ebpf:"filtered_connections"`
 	Http2InfoMem            *ebpf.Map `ebpf:"http2_info_mem"`
 	HttpInfoMem             *ebpf.Map `ebpf:"http_info_mem"`
+	IovecMem                *ebpf.Map `ebpf:"iovec_mem"`
+	JumpTable               *ebpf.Map `ebpf:"jump_table"`
+	NodejsParentMap         *ebpf.Map `ebpf:"nodejs_parent_map"`
 	OngoingHttp             *ebpf.Map `ebpf:"ongoing_http"`
 	OngoingHttp2Connections *ebpf.Map `ebpf:"ongoing_http2_connections"`
 	OngoingHttp2Grpc        *ebpf.Map `ebpf:"ongoing_http2_grpc"`
@@ -312,6 +343,7 @@ type bpf_debugMaps struct {
 	OngoingTcpReq           *ebpf.Map `ebpf:"ongoing_tcp_req"`
 	PidCache                *ebpf.Map `ebpf:"pid_cache"`
 	PidTidToConn            *ebpf.Map `ebpf:"pid_tid_to_conn"`
+	ProtocolArgsMem         *ebpf.Map `ebpf:"protocol_args_mem"`
 	ServerTraces            *ebpf.Map `ebpf:"server_traces"`
 	SslToConn               *ebpf.Map `ebpf:"ssl_to_conn"`
 	SslToPidTid             *ebpf.Map `ebpf:"ssl_to_pid_tid"`
@@ -327,6 +359,7 @@ func (m *bpf_debugMaps) Close() error {
 	return _Bpf_debugClose(
 		m.ActiveAcceptArgs,
 		m.ActiveConnectArgs,
+		m.ActiveNodejsIds,
 		m.ActiveRecvArgs,
 		m.ActiveSendArgs,
 		m.ActiveSendSockArgs,
@@ -336,10 +369,13 @@ func (m *bpf_debugMaps) Close() error {
 		m.ActiveSslWriteArgs,
 		m.CloneMap,
 		m.ConnectionMetaMem,
+		m.DebugEvents,
 		m.Events,
-		m.FilteredConnections,
 		m.Http2InfoMem,
 		m.HttpInfoMem,
+		m.IovecMem,
+		m.JumpTable,
+		m.NodejsParentMap,
 		m.OngoingHttp,
 		m.OngoingHttp2Connections,
 		m.OngoingHttp2Grpc,
@@ -347,6 +383,7 @@ func (m *bpf_debugMaps) Close() error {
 		m.OngoingTcpReq,
 		m.PidCache,
 		m.PidTidToConn,
+		m.ProtocolArgsMem,
 		m.ServerTraces,
 		m.SslToConn,
 		m.SslToPidTid,
@@ -375,6 +412,9 @@ type bpf_debugPrograms struct {
 	KretprobeSysConnect     *ebpf.Program `ebpf:"kretprobe_sys_connect"`
 	KretprobeTcpRecvmsg     *ebpf.Program `ebpf:"kretprobe_tcp_recvmsg"`
 	KretprobeTcpSendmsg     *ebpf.Program `ebpf:"kretprobe_tcp_sendmsg"`
+	ProtocolHttp            *ebpf.Program `ebpf:"protocol_http"`
+	ProtocolHttp2           *ebpf.Program `ebpf:"protocol_http2"`
+	ProtocolTcp             *ebpf.Program `ebpf:"protocol_tcp"`
 	SocketHttpFilter        *ebpf.Program `ebpf:"socket__http_filter"`
 }
 
@@ -392,6 +432,9 @@ func (p *bpf_debugPrograms) Close() error {
 		p.KretprobeSysConnect,
 		p.KretprobeTcpRecvmsg,
 		p.KretprobeTcpSendmsg,
+		p.ProtocolHttp,
+		p.ProtocolHttp2,
+		p.ProtocolTcp,
 		p.SocketHttpFilter,
 	)
 }
