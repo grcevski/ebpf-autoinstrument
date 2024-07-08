@@ -11,6 +11,7 @@ import (
 	"github.com/grafana/beyla/pkg/beyla"
 	"github.com/grafana/beyla/pkg/internal/ebpf"
 	"github.com/grafana/beyla/pkg/internal/goexec"
+	"github.com/grafana/beyla/pkg/internal/exec"
 	"github.com/grafana/beyla/pkg/internal/helpers"
 	"github.com/grafana/beyla/pkg/internal/imetrics"
 	"github.com/grafana/beyla/pkg/internal/svc"
@@ -120,10 +121,10 @@ func (ta *TraceAttacher) getTracer(ie *Instrumentable) (*ebpf.ProcessTracer, boo
 			programs = filterNotFoundPrograms(newGoTracersGroup(ta.Cfg, ta.Metrics), ie.Offsets)
 		}
 	case svc.InstrumentableNodejs:
-		programs = ta.genericTracers()
+		programs = ta.genericTracers(ie.FileInfo)
 		programs = append(programs, newNodeJSTracersGroup(ta.Cfg, ta.Metrics)...)
 	case svc.InstrumentableJava, svc.InstrumentableRuby, svc.InstrumentablePython, svc.InstrumentableDotnet, svc.InstrumentableGeneric, svc.InstrumentableRust, svc.InstrumentablePHP:
-		programs = ta.genericTracers()
+		programs = ta.genericTracers(ie.FileInfo)
 	default:
 		ta.log.Warn("unexpected instrumentable type. This is basically a bug", "type", ie.Type)
 	}
@@ -170,12 +171,12 @@ func (ta *TraceAttacher) getTracer(ie *Instrumentable) (*ebpf.ProcessTracer, boo
 	return tracer, true
 }
 
-func (ta *TraceAttacher) genericTracers() []ebpf.Tracer {
+func (ta *TraceAttacher) genericTracers(fi *exec.FileInfo) []ebpf.Tracer {
 	if ta.reusableTracer != nil {
-		return newNonGoTracersGroupUProbes(ta.Cfg, ta.Metrics)
+		return newNonGoTracersGroupUProbes(ta.Cfg, ta.Metrics, fi)
 	}
 
-	return newNonGoTracersGroup(ta.Cfg, ta.Metrics)
+	return newNonGoTracersGroup(ta.Cfg, ta.Metrics, fi)
 }
 
 func monitorPIDs(tracer *ebpf.ProcessTracer, ie *Instrumentable) {

@@ -119,6 +119,9 @@ func (p *Tracer) UProbes() map[string]map[string]ebpfcommon.FunctionPrograms {
 	}
 }
 
+
+func (p *Tracer) SetupTailCalls() {}
+
 func (p *Tracer) SocketFilters() []*ebpf.Program {
 	return nil
 }
