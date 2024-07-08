@@ -54,12 +54,14 @@ func New(cfg *beyla.Config, metrics imetrics.Reporter, fileInfo *exec.FileInfo) 
 	}
 }
 
-func (p *Tracer) AllowPID(pid, ns uint32, svc svc.ID) {
-	p.pidsFilter.AllowPID(pid, ns, svc, ebpfcommon.PIDTypeKProbes)
+func (p *Tracer) AllowPID(pid uint32, fi *exec.FileInfo) {
+	ebpfcommon.EstablishCudaPID(pid, fi)
+	p.pidsFilter.AllowPID(pid, fi.Ns, fi.Service, ebpfcommon.PIDTypeKProbes)
 }
 
-func (p *Tracer) BlockPID(pid, ns uint32) {
-	p.pidsFilter.BlockPID(pid, ns)
+func (p *Tracer) BlockPID(pid uint32, fi *exec.FileInfo) {
+	ebpfcommon.RemoveCudaPID(pid, fi)
+	p.pidsFilter.BlockPID(pid, fi.Ns)
 }
 
 func (p *Tracer) Load() (*ebpf.CollectionSpec, error) {

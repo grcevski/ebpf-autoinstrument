@@ -21,33 +21,52 @@ type pidKey struct {
 }
 
 var pidMap = map[pidKey]uint64{}
-var symbolsMap = map[uint64]map[uint64]string{}
+var symbolsMap = map[uint64]map[int64]string{}
+var baseMap = map[pidKey]uint64{}
 
 func ProcessCudaFileInfo(info *exec.FileInfo) {
-	k := pidKey{Pid:info.Pid, Ns: info.Ns}
-	if _, ok := pidMap[k]; ok {
-		return
-	}
-
-	pidMap[k] = info.Ino
 	if _, ok := symbolsMap[info.Ino]; ok {
 		return
 	}
 
-	base, err := execBase(info)
-	if err != nil {
-		slog.Error("Error finding base map image", "error", err)
-		return
-	}
-
-	symAddr, err := FindSymbolAddresses(base, info.ELF)
+	symAddr, err := FindSymbolAddresses(info.ELF)
 	if err != nil {
 		slog.Error("failed to find symbol addresses", "error", err)
 		return
 	}
 
+	slog.Info("Processing cuda symbol map for", "inode", info.Ino)
 
 	symbolsMap[info.Ino] = symAddr
+	EstablishCudaPID(uint32(info.Pid), info)
+}
+
+func EstablishCudaPID(pid uint32, fi *exec.FileInfo) {
+	base, err := execBase(pid, fi)
+	if err != nil {
+		slog.Error("Error finding base map image", "error", err)
+		return
+	}
+
+	allPids, err := exec.FindNamespacedPids(int32(pid))
+
+	if err != nil {
+		slog.Error("Error finding namespaced pids", "error", err)
+		return
+	}
+
+	for _, p := range allPids {
+		k := pidKey{Pid:int32(p), Ns: fi.Ns}
+		baseMap[k] = base
+		pidMap[k] = fi.Ino
+		slog.Info("Setting pid map", "pid", pid, "base", base)
+	}
+}
+
+func RemoveCudaPID(pid uint32, fi *exec.FileInfo) {
+	k := pidKey{Pid:int32(pid), Ns: fi.Ns}
+	delete(baseMap, k)
+	delete(pidMap, k)
 }
 
 func symToName(sym string) string {
@@ -58,13 +77,13 @@ func symToName(sym string) string {
 	return sym
 }
 
-func execBase(fileInfo *exec.FileInfo) (uint64, error) {
-	maps, err := exec.FindLibMaps(fileInfo.Pid)
+func execBase(pid uint32, fi *exec.FileInfo) (uint64, error) {
+	maps, err := exec.FindLibMaps(int32(pid))
 	if err != nil {
 		return 0, err
 	}
 
-	baseMap := exec.LibExecPath(fileInfo.CmdExePath, maps)
+	baseMap := exec.LibExecPath(fi.CmdExePath, maps)
 	if baseMap == nil {
 		return 0, errors.New("Can't find executable in maps, this is a bug.")
 	}
@@ -86,7 +105,13 @@ func symForAddr(pid int32, ns uint32, off uint64) (string, bool) {
 		return "", false
 	}
 
-	sym, ok := syms[off]
+	base, ok := baseMap[k]
+	if !ok {
+		slog.Warn("Can't find basemap")
+		return "", false
+	}
+
+	sym, ok := syms[int64(off)-int64(base)]
 	return sym, ok
 }
 
@@ -113,14 +138,14 @@ func ReadGPUKernelLaunchIntoSpan(record *ringbuf.Record) (request.Span, bool, er
 	}, false, nil
 }
 
-func collectSymbols(base uint64, f *elf.File, syms []elf.Symbol, addressToName map[uint64]string) {
+func collectSymbols(f *elf.File, syms []elf.Symbol, addressToName map[int64]string) {
 	for _, s := range syms {
 		if elf.ST_TYPE(s.Info) != elf.STT_FUNC {
 			// Symbol not associated with a function or other executable code.
 			continue
 		}
 
-		address := base + s.Value
+		address := int64(s.Value)
 		//fmt.Printf("Name: %s, address: %d\n", s.Name, address)
 		// Loop over ELF segments.
 		for _, prog := range f.Progs {
@@ -130,7 +155,7 @@ func collectSymbols(base uint64, f *elf.File, syms []elf.Symbol, addressToName m
 			}
 
 			if prog.Vaddr <= s.Value && s.Value < (prog.Vaddr+prog.Memsz) {
-				address = base + s.Value - prog.Vaddr
+				address = int64(s.Value) - int64(prog.Vaddr)
 				//fmt.Printf("\t->Name: %s, address: %d, vaddr: %d\n", s.Name, address, prog.Vaddr)
 				break
 			}
@@ -140,21 +165,21 @@ func collectSymbols(base uint64, f *elf.File, syms []elf.Symbol, addressToName m
 }
 
 // returns a map of symbol addresses to names
-func FindSymbolAddresses(base uint64, f *elf.File) (map[uint64]string, error) {
-	addressToName := map[uint64]string{}
+func FindSymbolAddresses(f *elf.File) (map[int64]string, error) {
+	addressToName := map[int64]string{}
 	syms, err := f.Symbols()
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, err
 	}
 
-	collectSymbols(base, f, syms, addressToName)
+	collectSymbols(f, syms, addressToName)
 
 	dynsyms, err := f.DynamicSymbols()
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, err
 	}
 
-	collectSymbols(base, f, dynsyms, addressToName)
+	collectSymbols(f, dynsyms, addressToName)
 
 	return addressToName, nil
 }
