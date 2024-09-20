@@ -19,8 +19,13 @@ type bpfConnectionInfoT struct {
 	D_port uint16
 }
 
+type bpfGoroutineKeyT struct {
+	Addr uint64
+	Pid  uint64
+}
+
 type bpfGoroutineMetadata struct {
-	Parent    uint64
+	Parent    bpfGoroutineKeyT
 	Timestamp uint64
 }
 
