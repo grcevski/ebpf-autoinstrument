@@ -430,6 +430,12 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				Start:    p.bpfObjects.BeylaAsyncReset,
 			}},
 		},
+		"libjvm.so": {
+			"_ZN9CodeCache6commitEP8CodeBlob": {{
+				Required: false,
+				Start:    p.bpfObjects.BeylaCodeCacheCommit,
+			}},
+		},
 	}
 }
 

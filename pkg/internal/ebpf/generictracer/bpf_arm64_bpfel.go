@@ -269,6 +269,7 @@ type bpfSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
 	BeylaAsyncReset                        *ebpf.ProgramSpec `ebpf:"beyla_async_reset"`
+	BeylaCodeCacheCommit                   *ebpf.ProgramSpec `ebpf:"beyla_code_cache_commit"`
 	BeylaEmitAsyncInit                     *ebpf.ProgramSpec `ebpf:"beyla_emit_async_init"`
 	BeylaKprobeSysExit                     *ebpf.ProgramSpec `ebpf:"beyla_kprobe_sys_exit"`
 	BeylaKprobeTcpCleanupRbuf              *ebpf.ProgramSpec `ebpf:"beyla_kprobe_tcp_cleanup_rbuf"`
@@ -470,6 +471,7 @@ func (m *bpfMaps) Close() error {
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
 	BeylaAsyncReset                        *ebpf.Program `ebpf:"beyla_async_reset"`
+	BeylaCodeCacheCommit                   *ebpf.Program `ebpf:"beyla_code_cache_commit"`
 	BeylaEmitAsyncInit                     *ebpf.Program `ebpf:"beyla_emit_async_init"`
 	BeylaKprobeSysExit                     *ebpf.Program `ebpf:"beyla_kprobe_sys_exit"`
 	BeylaKprobeTcpCleanupRbuf              *ebpf.Program `ebpf:"beyla_kprobe_tcp_cleanup_rbuf"`
@@ -511,6 +513,7 @@ type bpfPrograms struct {
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
 		p.BeylaAsyncReset,
+		p.BeylaCodeCacheCommit,
 		p.BeylaEmitAsyncInit,
 		p.BeylaKprobeSysExit,
 		p.BeylaKprobeTcpCleanupRbuf,
