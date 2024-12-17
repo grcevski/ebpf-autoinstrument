@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -88,6 +89,13 @@ type MisclassifiedEvent struct {
 	EventType int
 	TCPInfo   *TCPRequestInfo
 }
+
+type LibModule struct {
+	references uint64
+	closers    []io.Closer
+}
+
+type InstrumentedLibsT map[uint64]*LibModule
 
 var MisclassifiedEvents = make(chan MisclassifiedEvent)
 
@@ -244,4 +252,64 @@ func (connInfo *BPFConnInfo) reqHostInfo() (source, target string) {
 	}
 
 	return srcStr, dstStr
+}
+
+func (libs InstrumentedLibsT) At(id uint64) *LibModule {
+	module, ok := libs[id]
+
+	if !ok {
+		module = &LibModule{references: 0}
+		libs[id] = module
+	}
+
+	return module
+}
+
+func (libs InstrumentedLibsT) Find(id uint64) *LibModule {
+	module, ok := libs[id]
+
+	if ok {
+		return module
+	}
+
+	return nil
+}
+
+func (libs InstrumentedLibsT) AddRef(id uint64) *LibModule {
+	module := libs.At(id)
+	module.references++
+
+	return module
+}
+
+func (libs InstrumentedLibsT) RemoveRef(id uint64) (*LibModule, error) {
+	module := libs.Find(id)
+
+	if module == nil {
+		return nil, fmt.Errorf("attempt to remove reference of unknown module: %d", id)
+	}
+
+	if module.references == 0 {
+		return module, fmt.Errorf("attempt to remove reference of unreferenced module: %d", id)
+	}
+
+	module.references--
+
+	log := slog.With("instrumentedLibs", "removeRef")
+
+	if module.references == 0 {
+		for _, closer := range module.closers {
+			if err := closer.Close(); err != nil {
+				log.Debug("failed to close resource", "closer", closer, "error", err)
+			}
+		}
+
+		delete(libs, id)
+	}
+
+	return module, nil
+}
+
+func (m *LibModule) AddClosers(closers []io.Closer) {
+	m.closers = append(m.closers, closers...)
 }

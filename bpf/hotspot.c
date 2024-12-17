@@ -1,10 +1,9 @@
-#ifndef HOTSPOT_VM_H
-#define HOTSPOT_VM_H
-
 #include "vmlinux.h"
 #include "utils.h"
 #include "bpf_dbg.h"
 #include "pid.h"
+
+char __license[] SEC("license") = "Dual MIT/GPL";
 
 // CodeBlob/NMethod
 volatile const s32 cb_kind = 0x34;
@@ -32,7 +31,28 @@ volatile const s32 constants_size_of = 0x50;
 // InstanceKlass
 volatile const s32 instance_klass_name = 0x20;
 
-enum { kCodeBlob_Nmethod = 0x1 };
+enum { 
+    kCodeBlob_Nmethod = 0x1,    
+};
+
+#define NM_MAX_BUF_SIZE 80
+
+typedef struct nmethod_event {
+    char name[NM_MAX_BUF_SIZE];
+    char klass[NM_MAX_BUF_SIZE];
+    char signature[NM_MAX_BUF_SIZE];
+    u64 code_start;
+    int size;
+    pid_info pid;
+} nmethod_event_t;
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 12);
+    __uint(pinning, BEYLA_PIN_INTERNAL);
+} compilation_events SEC(".maps");
+
+const nmethod_event_t *unused_nmethod __attribute__((unused));
 
 static __always_inline int read_symbol(void *name_ptr, char *buf, int max_len) {
     void *name = 0;
@@ -47,6 +67,10 @@ static __always_inline int read_symbol(void *name_ptr, char *buf, int max_len) {
     if (len) {
         bpf_clamp_umax(len, max_len);
         bpf_probe_read(buf, len, name + symbol_body);
+    }
+
+    if (len < max_len) {
+        buf[len] = '\0';
     }
 
     return len;
@@ -67,20 +91,27 @@ static __always_inline void *start_address(void *nmethod) {
 SEC("uprobe/libjvm.so:CodeCacheCommit")
 int beyla_code_cache_commit(struct pt_regs *ctx) {
     u64 id = bpf_get_current_pid_tgid();
-    char buf[80];
 
     if (!valid_pid(id)) {
         return 0;
     }
 
+    nmethod_event_t *event = bpf_ringbuf_reserve(&compilation_events, sizeof(nmethod_event_t), 0);
+
+    if (!event) {
+        return 0;
+    }
+
+    event->size = -1;
+
     void *cb = (void *)PT_REGS_PARM1(ctx);
 
-    bpf_printk("=== uprobe HotspotVM CodeCache::commit id=%d wrap=%llx ===", id, cb);
+    bpf_dbg_printk("=== uprobe HotspotVM CodeCache::commit id=%d wrap=%llx ===", id, cb);
 
     u8 kind = 0;
     bpf_probe_read(&kind, sizeof(kind), cb + cb_kind);
 
-    bpf_printk("kind: %d", kind);
+    bpf_dbg_printk("kind: %d", kind);
 
     if (kind == kCodeBlob_Nmethod) {
         void *method = 0;
@@ -89,11 +120,14 @@ int beyla_code_cache_commit(struct pt_regs *ctx) {
 
         bpf_probe_read(&code_size, sizeof(code_size), cb + cb_size);
         bpf_probe_read(&method, sizeof(method), cb + nmethod_method);
-        bpf_printk("method: %llx, start: 0x%llx, size 0x%x", method, code_start_address, code_size);
+        bpf_dbg_printk("method: %llx, start: 0x%llx, size 0x%x", method, code_start_address, code_size);
+
+        event->code_start = (u64)code_start_address;
+        event->size = code_size;
 
         if (method) {
-            int name_len = read_symbol(method + method_name, buf, 80);
-            bpf_printk("[%d]name: %s", name_len, buf);
+            int __attribute__((unused)) name_len = read_symbol(method + method_name, event->name, NM_MAX_BUF_SIZE);
+            bpf_dbg_printk("[%d]name: %s", name_len, event->name);
 
             void *const_method = 0;
             bpf_probe_read(&const_method, sizeof(const_method), method + method_const_method);
@@ -113,20 +147,20 @@ int beyla_code_cache_commit(struct pt_regs *ctx) {
                         &pool_holder, sizeof(pool_holder), constants + constants_pool_holder);
 
                     if (pool_holder) {
-                        int klass_name_len =
-                            read_symbol(pool_holder + instance_klass_name, buf, 80);
-                        bpf_printk("[%d]klass name: %s", klass_name_len, buf);
+                        int __attribute__((unused)) klass_name_len =
+                            read_symbol(pool_holder + instance_klass_name, event->klass, 80);
+                        bpf_dbg_printk("[%d]klass name: %s", klass_name_len, event->klass);
                     }
 
-                    int sig_len = read_symbol(
-                        constants + constants_size_of + (signature_idx * sizeof(void *)), buf, 80);
-                    bpf_printk("[%d]signature: %s", sig_len, buf);
+                    int __attribute__((unused)) sig_len = read_symbol(
+                        constants + constants_size_of + (signature_idx * sizeof(void *)), event->signature, 80);
+                    bpf_dbg_printk("[%d]signature: %s", sig_len, event->signature);
                 }
             }
         }
     }
 
+    bpf_ringbuf_submit(event, 0);
+
     return 0;
 }
-
-#endif // HOTSPOT_VM_H
