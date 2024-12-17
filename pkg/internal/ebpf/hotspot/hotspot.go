@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/cilium/ebpf"
@@ -18,6 +19,7 @@ import (
 	"github.com/grafana/beyla/pkg/internal/goexec"
 	"github.com/grafana/beyla/pkg/internal/request"
 	"github.com/grafana/beyla/pkg/internal/svc"
+	"github.com/grafana/jvmtools/jvm"
 )
 
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -target amd64,arm64 -type nmethod_event_t bpf ../../../../bpf/hotspot.c -- -I../../../../bpf/headers
@@ -44,7 +46,23 @@ func New(cfg *beyla.Config) *Tracer {
 	}
 }
 
-func (p *Tracer) AllowPID(uint32, uint32, *svc.Attrs) {}
+func (p *Tracer) AllowPID(pid uint32, _ uint32, _ *svc.Attrs) {
+	out := make(chan []byte)
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for data := range out {
+			os.Stdout.Write(data)
+		}
+	}()
+
+	jvm.Jattach(int(pid), []string{"jcmd", "VM.version"}, out, p.log)
+	close(out)
+	wg.Wait()
+
+}
 
 func (p *Tracer) BlockPID(uint32, uint32) {}
 
