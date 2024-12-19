@@ -31,8 +31,8 @@ volatile const s32 constants_size_of = 0x50;
 // InstanceKlass
 volatile const s32 instance_klass_name = 0x20;
 
-enum { 
-    kCodeBlob_Nmethod = 0x1,    
+enum {
+    kCodeBlob_Nmethod = 0x1,
 };
 
 #define NM_MAX_BUF_SIZE 80
@@ -102,6 +102,7 @@ int beyla_code_cache_commit(struct pt_regs *ctx) {
         return 0;
     }
 
+    task_pid(&event->pid);
     event->size = -1;
 
     void *cb = (void *)PT_REGS_PARM1(ctx);
@@ -120,13 +121,15 @@ int beyla_code_cache_commit(struct pt_regs *ctx) {
 
         bpf_probe_read(&code_size, sizeof(code_size), cb + cb_size);
         bpf_probe_read(&method, sizeof(method), cb + nmethod_method);
-        bpf_dbg_printk("method: %llx, start: 0x%llx, size 0x%x", method, code_start_address, code_size);
+        bpf_dbg_printk(
+            "method: %llx, start: 0x%llx, size 0x%x", method, code_start_address, code_size);
 
         event->code_start = (u64)code_start_address;
         event->size = code_size;
 
         if (method) {
-            int __attribute__((unused)) name_len = read_symbol(method + method_name, event->name, NM_MAX_BUF_SIZE);
+            int __attribute__((unused)) name_len =
+                read_symbol(method + method_name, event->name, NM_MAX_BUF_SIZE);
             bpf_dbg_printk("[%d]name: %s", name_len, event->name);
 
             void *const_method = 0;
@@ -153,7 +156,9 @@ int beyla_code_cache_commit(struct pt_regs *ctx) {
                     }
 
                     int __attribute__((unused)) sig_len = read_symbol(
-                        constants + constants_size_of + (signature_idx * sizeof(void *)), event->signature, 80);
+                        constants + constants_size_of + (signature_idx * sizeof(void *)),
+                        event->signature,
+                        80);
                     bpf_dbg_printk("[%d]signature: %s", sig_len, event->signature);
                 }
             }

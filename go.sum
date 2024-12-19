@@ -110,8 +110,8 @@ github.com/gorilla/websocket v1.5.0 h1:PPwGk2jz7EePpoHN/+ClbZu8SPxiqlu12wZP/3sWm
 github.com/gorilla/websocket v1.5.0/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/grafana/go-offsets-tracker v0.1.7 h1:2zBQ7iiGzvyXY7LA8kaaSiEqH/Yx82UcfRabbY5aOG4=
 github.com/grafana/go-offsets-tracker v0.1.7/go.mod h1:qcQdu7zlUKIFNUdBJlLyNHuJGW0SKWKjkrN6jtt+jds=
-github.com/grafana/jvmtools v0.0.0-20241217165236-18c01f562320 h1:N+RVIkDKtBsmmFnda5rNocrwY+qdPkdxUJPfwGcQmGk=
-github.com/grafana/jvmtools v0.0.0-20241217165236-18c01f562320/go.mod h1:b0tiPI5zNyIuPUz2DwvxUCI+5bFoG7A4i47F9sc8w98=
+github.com/grafana/jvmtools v0.0.3 h1:4uPquep5v+54Z04OQYOCldrv2SR42IRagHQXrNHsc4g=
+github.com/grafana/jvmtools v0.0.3/go.mod h1:b0tiPI5zNyIuPUz2DwvxUCI+5bFoG7A4i47F9sc8w98=
 github.com/grafana/opentelemetry-go v1.28.0-grafana.3 h1:vExZiZKDZTdDi7fP1GG3GOGuoZ0GNu76408tNXfsnD0=
 github.com/grafana/opentelemetry-go v1.28.0-grafana.3/go.mod h1:q68ijF8Fc8CnMHKyzqL6akLO46ePnjkgfIMIjUIX9z4=
 github.com/grafana/opentelemetry-go/metric v1.28.0-grafana.3 h1:CfCrKV0S4Lq7yJ1pShUrxaV34EGhUpE+3GW3XyaMbJU=

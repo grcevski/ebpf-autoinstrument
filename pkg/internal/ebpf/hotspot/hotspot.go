@@ -1,12 +1,13 @@
 package hotspot
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"sync"
 
 	"github.com/cilium/ebpf"
@@ -47,21 +48,19 @@ func New(cfg *beyla.Config) *Tracer {
 }
 
 func (p *Tracer) AllowPID(pid uint32, _ uint32, _ *svc.Attrs) {
-	out := make(chan []byte)
-	var wg sync.WaitGroup
+	out, err := jvm.Jattach(int(pid), []string{"jcmd", "VM.version"}, p.log)
+	if err != nil {
+		p.log.Error("error executing command for the JVM", "pid", pid, "error", err)
+		return
+	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for data := range out {
-			os.Stdout.Write(data)
-		}
-	}()
-
-	jvm.Jattach(int(pid), []string{"jcmd", "VM.version"}, out, p.log)
-	close(out)
-	wg.Wait()
-
+	scanner := bufio.NewScanner(out)
+	for scanner.Scan() {
+		fmt.Println(scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		p.log.Error("error reading from scanner", "error", err)
+	}
 }
 
 func (p *Tracer) BlockPID(uint32, uint32) {}
