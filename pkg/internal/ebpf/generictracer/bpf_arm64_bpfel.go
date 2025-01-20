@@ -328,12 +328,28 @@ type bpfMapSpecs struct {
 	CloneMap                *ebpf.MapSpec `ebpf:"clone_map"`
 	ConnectionMetaMem       *ebpf.MapSpec `ebpf:"connection_meta_mem"`
 	Events                  *ebpf.MapSpec `ebpf:"events"`
+	ExeIdTo10StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_10_stack_deltas"`
+	ExeIdTo11StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_11_stack_deltas"`
+	ExeIdTo12StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_12_stack_deltas"`
+	ExeIdTo13StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_13_stack_deltas"`
+	ExeIdTo14StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_14_stack_deltas"`
+	ExeIdTo15StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_15_stack_deltas"`
+	ExeIdTo16StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_16_stack_deltas"`
+	ExeIdTo17StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_17_stack_deltas"`
+	ExeIdTo18StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_18_stack_deltas"`
+	ExeIdTo19StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_19_stack_deltas"`
+	ExeIdTo20StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_20_stack_deltas"`
+	ExeIdTo21StackDeltas    *ebpf.MapSpec `ebpf:"exe_id_to_21_stack_deltas"`
+	ExeIdTo8StackDeltas     *ebpf.MapSpec `ebpf:"exe_id_to_8_stack_deltas"`
+	ExeIdTo9StackDeltas     *ebpf.MapSpec `ebpf:"exe_id_to_9_stack_deltas"`
 	GrpcFramesCtxMem        *ebpf.MapSpec `ebpf:"grpc_frames_ctx_mem"`
 	Http2InfoMem            *ebpf.MapSpec `ebpf:"http2_info_mem"`
 	HttpInfoMem             *ebpf.MapSpec `ebpf:"http_info_mem"`
 	IncomingTraceMap        *ebpf.MapSpec `ebpf:"incoming_trace_map"`
+	InterpreterOffsets      *ebpf.MapSpec `ebpf:"interpreter_offsets"`
 	IovecMem                *ebpf.MapSpec `ebpf:"iovec_mem"`
 	JumpTable               *ebpf.MapSpec `ebpf:"jump_table"`
+	KernelStackmap          *ebpf.MapSpec `ebpf:"kernel_stackmap"`
 	MsgBuffers              *ebpf.MapSpec `ebpf:"msg_buffers"`
 	NodejsParentMap         *ebpf.MapSpec `ebpf:"nodejs_parent_map"`
 	OngoingHttp             *ebpf.MapSpec `ebpf:"ongoing_http"`
@@ -348,11 +364,13 @@ type bpfMapSpecs struct {
 	ServerTraces            *ebpf.MapSpec `ebpf:"server_traces"`
 	SslToConn               *ebpf.MapSpec `ebpf:"ssl_to_conn"`
 	SslToPidTid             *ebpf.MapSpec `ebpf:"ssl_to_pid_tid"`
+	StackDeltaPageToInfo    *ebpf.MapSpec `ebpf:"stack_delta_page_to_info"`
 	TcpConnectionMap        *ebpf.MapSpec `ebpf:"tcp_connection_map"`
 	TcpReqMem               *ebpf.MapSpec `ebpf:"tcp_req_mem"`
 	TpCharBufMem            *ebpf.MapSpec `ebpf:"tp_char_buf_mem"`
 	TpInfoMem               *ebpf.MapSpec `ebpf:"tp_info_mem"`
 	TraceMap                *ebpf.MapSpec `ebpf:"trace_map"`
+	UnwindInfoArray         *ebpf.MapSpec `ebpf:"unwind_info_array"`
 	ValidPids               *ebpf.MapSpec `ebpf:"valid_pids"`
 }
 
@@ -391,12 +409,28 @@ type bpfMaps struct {
 	CloneMap                *ebpf.Map `ebpf:"clone_map"`
 	ConnectionMetaMem       *ebpf.Map `ebpf:"connection_meta_mem"`
 	Events                  *ebpf.Map `ebpf:"events"`
+	ExeIdTo10StackDeltas    *ebpf.Map `ebpf:"exe_id_to_10_stack_deltas"`
+	ExeIdTo11StackDeltas    *ebpf.Map `ebpf:"exe_id_to_11_stack_deltas"`
+	ExeIdTo12StackDeltas    *ebpf.Map `ebpf:"exe_id_to_12_stack_deltas"`
+	ExeIdTo13StackDeltas    *ebpf.Map `ebpf:"exe_id_to_13_stack_deltas"`
+	ExeIdTo14StackDeltas    *ebpf.Map `ebpf:"exe_id_to_14_stack_deltas"`
+	ExeIdTo15StackDeltas    *ebpf.Map `ebpf:"exe_id_to_15_stack_deltas"`
+	ExeIdTo16StackDeltas    *ebpf.Map `ebpf:"exe_id_to_16_stack_deltas"`
+	ExeIdTo17StackDeltas    *ebpf.Map `ebpf:"exe_id_to_17_stack_deltas"`
+	ExeIdTo18StackDeltas    *ebpf.Map `ebpf:"exe_id_to_18_stack_deltas"`
+	ExeIdTo19StackDeltas    *ebpf.Map `ebpf:"exe_id_to_19_stack_deltas"`
+	ExeIdTo20StackDeltas    *ebpf.Map `ebpf:"exe_id_to_20_stack_deltas"`
+	ExeIdTo21StackDeltas    *ebpf.Map `ebpf:"exe_id_to_21_stack_deltas"`
+	ExeIdTo8StackDeltas     *ebpf.Map `ebpf:"exe_id_to_8_stack_deltas"`
+	ExeIdTo9StackDeltas     *ebpf.Map `ebpf:"exe_id_to_9_stack_deltas"`
 	GrpcFramesCtxMem        *ebpf.Map `ebpf:"grpc_frames_ctx_mem"`
 	Http2InfoMem            *ebpf.Map `ebpf:"http2_info_mem"`
 	HttpInfoMem             *ebpf.Map `ebpf:"http_info_mem"`
 	IncomingTraceMap        *ebpf.Map `ebpf:"incoming_trace_map"`
+	InterpreterOffsets      *ebpf.Map `ebpf:"interpreter_offsets"`
 	IovecMem                *ebpf.Map `ebpf:"iovec_mem"`
 	JumpTable               *ebpf.Map `ebpf:"jump_table"`
+	KernelStackmap          *ebpf.Map `ebpf:"kernel_stackmap"`
 	MsgBuffers              *ebpf.Map `ebpf:"msg_buffers"`
 	NodejsParentMap         *ebpf.Map `ebpf:"nodejs_parent_map"`
 	OngoingHttp             *ebpf.Map `ebpf:"ongoing_http"`
@@ -411,11 +445,13 @@ type bpfMaps struct {
 	ServerTraces            *ebpf.Map `ebpf:"server_traces"`
 	SslToConn               *ebpf.Map `ebpf:"ssl_to_conn"`
 	SslToPidTid             *ebpf.Map `ebpf:"ssl_to_pid_tid"`
+	StackDeltaPageToInfo    *ebpf.Map `ebpf:"stack_delta_page_to_info"`
 	TcpConnectionMap        *ebpf.Map `ebpf:"tcp_connection_map"`
 	TcpReqMem               *ebpf.Map `ebpf:"tcp_req_mem"`
 	TpCharBufMem            *ebpf.Map `ebpf:"tp_char_buf_mem"`
 	TpInfoMem               *ebpf.Map `ebpf:"tp_info_mem"`
 	TraceMap                *ebpf.Map `ebpf:"trace_map"`
+	UnwindInfoArray         *ebpf.Map `ebpf:"unwind_info_array"`
 	ValidPids               *ebpf.Map `ebpf:"valid_pids"`
 }
 
@@ -437,12 +473,28 @@ func (m *bpfMaps) Close() error {
 		m.CloneMap,
 		m.ConnectionMetaMem,
 		m.Events,
+		m.ExeIdTo10StackDeltas,
+		m.ExeIdTo11StackDeltas,
+		m.ExeIdTo12StackDeltas,
+		m.ExeIdTo13StackDeltas,
+		m.ExeIdTo14StackDeltas,
+		m.ExeIdTo15StackDeltas,
+		m.ExeIdTo16StackDeltas,
+		m.ExeIdTo17StackDeltas,
+		m.ExeIdTo18StackDeltas,
+		m.ExeIdTo19StackDeltas,
+		m.ExeIdTo20StackDeltas,
+		m.ExeIdTo21StackDeltas,
+		m.ExeIdTo8StackDeltas,
+		m.ExeIdTo9StackDeltas,
 		m.GrpcFramesCtxMem,
 		m.Http2InfoMem,
 		m.HttpInfoMem,
 		m.IncomingTraceMap,
+		m.InterpreterOffsets,
 		m.IovecMem,
 		m.JumpTable,
+		m.KernelStackmap,
 		m.MsgBuffers,
 		m.NodejsParentMap,
 		m.OngoingHttp,
@@ -457,11 +509,13 @@ func (m *bpfMaps) Close() error {
 		m.ServerTraces,
 		m.SslToConn,
 		m.SslToPidTid,
+		m.StackDeltaPageToInfo,
 		m.TcpConnectionMap,
 		m.TcpReqMem,
 		m.TpCharBufMem,
 		m.TpInfoMem,
 		m.TraceMap,
+		m.UnwindInfoArray,
 		m.ValidPids,
 	)
 }
