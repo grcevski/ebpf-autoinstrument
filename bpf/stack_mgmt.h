@@ -6,7 +6,6 @@
 #include "bpf_dbg.h"
 #include "frametypes.h"
 #include "stack_types.h"
-#include "stack_extmaps.h"
 
 #if defined __BYTE_ORDER__ && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define __constant_cpu_to_be32(x) __builtin_bswap32(x)
@@ -17,6 +16,32 @@
 #else
 #error "Unknown endianness"
 #endif
+
+struct bpf_map_def SEC("maps") per_cpu_records = {
+    .type = BPF_MAP_TYPE_PERCPU_ARRAY,
+    .key_size = sizeof(int),
+    .value_size = sizeof(PerCPURecord),
+    .max_entries = 1,
+};
+
+struct bpf_map_def SEC("maps") pid_page_to_mapping_info = {
+    .type = BPF_MAP_TYPE_LPM_TRIE,
+    .key_size = sizeof(PIDPage),
+    .value_size = sizeof(PIDPageMappingInfo),
+    .max_entries = 524288, // 2^19
+    .map_flags = BPF_F_NO_PREALLOC,
+};
+
+// The decision whether to unwind native stacks or interpreter stacks is made by checking if a given
+// PC address falls into the "interpreter loop" of an interpreter. This map helps identify such
+// loops: The keys are those executable section IDs that contain interpreter loops, the values
+// identify the offset range within this executable section that contains the interpreter loop.
+struct bpf_map_def SEC("maps") interpreter_offsets = {
+    .type = BPF_MAP_TYPE_HASH,
+    .key_size = sizeof(u64),
+    .value_size = sizeof(OffsetRange),
+    .max_entries = 32,
+};
 
 static inline __attribute__((__always_inline__)) void increment_metric(u32 metricID) {
 }
@@ -42,7 +67,7 @@ static inline PerCPURecord *get_per_cpu_record(void) {
 static inline __attribute__((__always_inline__)) ErrorCode _push_with_max_frames(
     Trace *trace, u64 file, u64 line, u8 frame_type, u8 return_address, u32 max_frames) {
     if (trace->stack_len >= max_frames) {
-        bpf_dbg_printk("unable to push frame: stack is full");
+        bpf_d_printk("unable to push frame: stack is full");
         increment_metric(metricID_UnwindErrStackLengthExceeded);
         return ERR_STACK_LENGTH_EXCEEDED;
     }
@@ -117,7 +142,7 @@ static ErrorCode resolve_unwind_mapping(PerCPURecord *record, int *unwinder) {
     if (is_kernel_address(pc)) {
         // This should not happen as we should only be unwinding usermode stacks.
         // Seeing PC point to a kernel address indicates a bad unwind.
-        bpf_dbg_printk("PC value %lx is a kernel address", (unsigned long)pc);
+        bpf_d_printk("PC value %lx is a kernel address", (unsigned long)pc);
         state->error_metric = metricID_UnwindNativeErrKernelAddress;
         return ERR_NATIVE_UNEXPECTED_KERNEL_ADDRESS;
     }
@@ -127,7 +152,7 @@ static ErrorCode resolve_unwind_mapping(PerCPURecord *record, int *unwinder) {
         // above the value defined in /proc/sys/vm/mmap_min_addr.
         // As such small PC values happens regularly (e.g. by handling or extracting the
         // PC value incorrectly) we track them but don't proceed with unwinding.
-        bpf_dbg_printk("small pc value %lx, ignoring", (unsigned long)pc);
+        bpf_d_printk("small pc value %lx, ignoring", (unsigned long)pc);
         state->error_metric = metricID_UnwindNativeSmallPC;
         return ERR_NATIVE_SMALL_PC;
     }
@@ -141,8 +166,7 @@ static ErrorCode resolve_unwind_mapping(PerCPURecord *record, int *unwinder) {
     PIDPageMappingInfo *val =
         (PIDPageMappingInfo *)bpf_map_lookup_elem(&pid_page_to_mapping_info, &key);
     if (!val) {
-        bpf_dbg_printk("Failure to look up interval memory mapping for PC 0x%lx",
-                       (unsigned long)pc);
+        bpf_d_printk("Failure to look up interval memory mapping for PC 0x%lx", (unsigned long)pc);
         state->error_metric = metricID_UnwindNativeErrWrongTextSection;
         return ERR_NATIVE_NO_PID_PAGE_MAPPING;
     }
@@ -151,13 +175,13 @@ static ErrorCode resolve_unwind_mapping(PerCPURecord *record, int *unwinder) {
         val->bias_and_unwind_program, &state->text_section_bias, unwinder);
     state->text_section_id = val->file_id;
     state->text_section_offset = pc - state->text_section_bias;
-    bpf_dbg_printk("Text section id for PC %lx is %llx (unwinder %d)",
-                   (unsigned long)pc,
-                   state->text_section_id,
-                   *unwinder);
-    bpf_dbg_printk("Text section bias is %llx, and offset is %llx",
-                   state->text_section_bias,
-                   state->text_section_offset);
+    bpf_d_printk("Text section id for PC %lx is %llx (unwinder %d)",
+                 (unsigned long)pc,
+                 state->text_section_id,
+                 *unwinder);
+    bpf_d_printk("Text section bias is %llx, and offset is %llx",
+                 state->text_section_bias,
+                 state->text_section_offset);
 
     return ERR_OK;
 }
@@ -170,12 +194,12 @@ static inline int get_next_interpreter(PerCPURecord *record) {
     OffsetRange *range = (OffsetRange *)bpf_map_lookup_elem(&interpreter_offsets, &section_id);
     if (range != 0) {
         if ((section_offset >= range->lower_offset) && (section_offset <= range->upper_offset)) {
-            bpf_dbg_printk("interpreter_offsets match %d", range->program_index);
+            bpf_d_printk("interpreter_offsets match %d", range->program_index);
             if (!unwinder_is_done(record, range->program_index)) {
                 increment_metric(metricID_UnwindCallInterpreter);
                 return range->program_index;
             }
-            bpf_dbg_printk("interpreter unwinder done");
+            bpf_d_printk("interpreter unwinder done");
         }
     }
     return PROG_UNWIND_NATIVE;
@@ -189,12 +213,12 @@ get_next_unwinder_after_native_frame(PerCPURecord *record, int *unwinder) {
     *unwinder = PROG_UNWIND_STOP;
 
     if (state->pc == 0) {
-        bpf_dbg_printk("Stopping unwind due to unwind failure (PC == 0)");
+        bpf_d_printk("Stopping unwind due to unwind failure (PC == 0)");
         state->error_metric = metricID_UnwindErrZeroPC;
         return ERR_NATIVE_ZERO_PC;
     }
 
-    bpf_dbg_printk("==== Resolve next frame unwinder: frame %d ====", record->trace.stack_len);
+    bpf_d_printk("==== Resolve next frame unwinder: frame %d ====", record->trace.stack_len);
     ErrorCode error = resolve_unwind_mapping(record, unwinder);
     if (error) {
         return error;

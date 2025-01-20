@@ -174,6 +174,11 @@ type bpfSslPidConnectionInfoT struct {
 	_         [2]byte
 }
 
+type bpfStackDelta struct {
+	AddrLow    uint16
+	UnwindInfo uint16
+}
+
 type bpfTcpReqT struct {
 	Flags           uint8
 	_               [3]byte
@@ -358,13 +363,17 @@ type bpfMapSpecs struct {
 	OngoingHttpFallback     *ebpf.MapSpec `ebpf:"ongoing_http_fallback"`
 	OngoingTcpReq           *ebpf.MapSpec `ebpf:"ongoing_tcp_req"`
 	OutgoingTraceMap        *ebpf.MapSpec `ebpf:"outgoing_trace_map"`
+	PerCpuRecords           *ebpf.MapSpec `ebpf:"per_cpu_records"`
 	PidCache                *ebpf.MapSpec `ebpf:"pid_cache"`
+	PidPageToMappingInfo    *ebpf.MapSpec `ebpf:"pid_page_to_mapping_info"`
 	PidTidToConn            *ebpf.MapSpec `ebpf:"pid_tid_to_conn"`
 	ProtocolArgsMem         *ebpf.MapSpec `ebpf:"protocol_args_mem"`
 	ServerTraces            *ebpf.MapSpec `ebpf:"server_traces"`
 	SslToConn               *ebpf.MapSpec `ebpf:"ssl_to_conn"`
 	SslToPidTid             *ebpf.MapSpec `ebpf:"ssl_to_pid_tid"`
+	StackDeltaArray         *ebpf.MapSpec `ebpf:"stack_delta_array"`
 	StackDeltaPageToInfo    *ebpf.MapSpec `ebpf:"stack_delta_page_to_info"`
+	SystemConfig            *ebpf.MapSpec `ebpf:"system_config"`
 	TcpConnectionMap        *ebpf.MapSpec `ebpf:"tcp_connection_map"`
 	TcpReqMem               *ebpf.MapSpec `ebpf:"tcp_req_mem"`
 	TpCharBufMem            *ebpf.MapSpec `ebpf:"tp_char_buf_mem"`
@@ -439,13 +448,17 @@ type bpfMaps struct {
 	OngoingHttpFallback     *ebpf.Map `ebpf:"ongoing_http_fallback"`
 	OngoingTcpReq           *ebpf.Map `ebpf:"ongoing_tcp_req"`
 	OutgoingTraceMap        *ebpf.Map `ebpf:"outgoing_trace_map"`
+	PerCpuRecords           *ebpf.Map `ebpf:"per_cpu_records"`
 	PidCache                *ebpf.Map `ebpf:"pid_cache"`
+	PidPageToMappingInfo    *ebpf.Map `ebpf:"pid_page_to_mapping_info"`
 	PidTidToConn            *ebpf.Map `ebpf:"pid_tid_to_conn"`
 	ProtocolArgsMem         *ebpf.Map `ebpf:"protocol_args_mem"`
 	ServerTraces            *ebpf.Map `ebpf:"server_traces"`
 	SslToConn               *ebpf.Map `ebpf:"ssl_to_conn"`
 	SslToPidTid             *ebpf.Map `ebpf:"ssl_to_pid_tid"`
+	StackDeltaArray         *ebpf.Map `ebpf:"stack_delta_array"`
 	StackDeltaPageToInfo    *ebpf.Map `ebpf:"stack_delta_page_to_info"`
+	SystemConfig            *ebpf.Map `ebpf:"system_config"`
 	TcpConnectionMap        *ebpf.Map `ebpf:"tcp_connection_map"`
 	TcpReqMem               *ebpf.Map `ebpf:"tcp_req_mem"`
 	TpCharBufMem            *ebpf.Map `ebpf:"tp_char_buf_mem"`
@@ -503,13 +516,17 @@ func (m *bpfMaps) Close() error {
 		m.OngoingHttpFallback,
 		m.OngoingTcpReq,
 		m.OutgoingTraceMap,
+		m.PerCpuRecords,
 		m.PidCache,
+		m.PidPageToMappingInfo,
 		m.PidTidToConn,
 		m.ProtocolArgsMem,
 		m.ServerTraces,
 		m.SslToConn,
 		m.SslToPidTid,
+		m.StackDeltaArray,
 		m.StackDeltaPageToInfo,
+		m.SystemConfig,
 		m.TcpConnectionMap,
 		m.TcpReqMem,
 		m.TpCharBufMem,

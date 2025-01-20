@@ -10,6 +10,7 @@
 #include "pin_internal.h"
 #include "k_send_receive.h"
 #include "k_unix_sock.h"
+#include "native_stack_trace.h"
 
 // Temporary tracking of accept arguments
 struct {
@@ -76,6 +77,10 @@ int BPF_KPROBE(beyla_kprobe_tcp_rcv_established, struct sock *sk, struct sk_buff
     if (!valid_pid(id)) {
         return 0;
     }
+
+    int res = unwind_native(ctx);
+
+    bpf_printk("Unwind native res %d", res);
 
     bpf_dbg_printk("=== tcp_rcv_established id=%d ===", id);
 

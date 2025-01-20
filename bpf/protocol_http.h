@@ -10,7 +10,6 @@
 #include "trace_common.h"
 #include "pin_internal.h"
 #include "http_maps.h"
-#include "native_stack_trace.h"
 
 volatile const u32 high_request_volume;
 
@@ -379,10 +378,6 @@ int beyla_protocol_http(void *ctx) {
         bpf_probe_read(info->buf, FULL_BUF_SIZE, (void *)args->u_buf);
         process_http_request(info, args->bytes_len, meta, args->direction, args->orig_dport);
     } else if ((args->packet_type == PACKET_TYPE_RESPONSE) && (info->status == 0)) {
-        int res = unwind_native(ctx);
-
-        bpf_printk("Unwind native res %d", res);
-
         handle_http_response(
             args->small_buf, &args->pid_conn, info, args->bytes_len, args->direction, args->ssl);
         if (fallback) {
