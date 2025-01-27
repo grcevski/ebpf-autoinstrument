@@ -25,6 +25,9 @@ import (
 	"github.com/grafana/beyla/pkg/internal/imetrics"
 	"github.com/grafana/beyla/pkg/internal/request"
 	"github.com/grafana/beyla/pkg/internal/svc"
+	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
+	"go.opentelemetry.io/ebpf-profiler/nativeunwind/elfunwindinfo"
+	sdtypes "go.opentelemetry.io/ebpf-profiler/nativeunwind/stackdeltatypes"
 )
 
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -target amd64,arm64 bpf ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers
@@ -124,6 +127,13 @@ func (p *Tracer) ProcessBinary(fileInfo *exec.FileInfo) {
 	if fileInfo == nil || fileInfo.ELF == nil {
 		p.log.Error("Empty fileinfo for Cuda")
 	} else {
+		var interval sdtypes.IntervalData
+		ref := pfelf.NewReference(fileInfo.CmdExePath, pfelf.SystemOpener)
+		err := elfunwindinfo.ExtractELF(ref, &interval)
+		if err != nil {
+			p.log.Error("error getting stack deltas", "err", err)
+		}
+
 		p.processCudaFileInfo(fileInfo)
 	}
 }
