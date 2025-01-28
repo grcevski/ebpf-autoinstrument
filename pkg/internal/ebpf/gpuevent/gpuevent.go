@@ -179,6 +179,12 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			"cudaMalloc": {{
 				Start: p.bpfObjects.HandleCudaMalloc,
 			}},
+			"cudaMemcpy": {{
+				Start: p.bpfObjects.HandleCudaMemcpy,
+			}},
+			"cudaMemcpyAsync": {{
+				Start: p.bpfObjects.HandleCudaMemcpy,
+			}},
 		},
 	}
 }
@@ -320,7 +326,7 @@ func (p *Tracer) readGPUKernelLaunchIntoSpan(record *ringbuf.Record) (request.Sp
 	}
 
 	// Log the GPU Kernel Launch event
-	p.log.Info("GPU Kernel Launch", "event", event)
+	p.log.Debug("GPU Kernel Launch", "event", event)
 
 	// Find the symbol for the kernel launch
 	symbol, ok := p.symForAddr(int32(event.PidInfo.UserPid), event.PidInfo.Ns, event.KernFuncOff)
