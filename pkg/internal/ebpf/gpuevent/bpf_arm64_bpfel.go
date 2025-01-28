@@ -42,6 +42,31 @@ type bpfGpuMallocT struct {
 	}
 }
 
+type bpfStackDelta struct {
+	AddrLow    uint16
+	UnwindInfo uint16
+}
+
+type bpfStackDeltaPageInfo struct {
+	FirstDelta uint32
+	NumDeltas  uint16
+	MapID      uint16
+}
+
+type bpfStackDeltaPageKey struct {
+	FileID uint64
+	Page   uint64
+}
+
+type bpfUnwindInfo struct {
+	Opcode      uint8
+	FpOpcode    uint8
+	MergeOpcode uint8
+	_           [1]byte
+	Param       int32
+	FpParam     int32
+}
+
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -91,9 +116,31 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	PidCache  *ebpf.MapSpec `ebpf:"pid_cache"`
-	Rb        *ebpf.MapSpec `ebpf:"rb"`
-	ValidPids *ebpf.MapSpec `ebpf:"valid_pids"`
+	ExeIdTo10StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_10_stack_deltas"`
+	ExeIdTo11StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_11_stack_deltas"`
+	ExeIdTo12StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_12_stack_deltas"`
+	ExeIdTo13StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_13_stack_deltas"`
+	ExeIdTo14StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_14_stack_deltas"`
+	ExeIdTo15StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_15_stack_deltas"`
+	ExeIdTo16StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_16_stack_deltas"`
+	ExeIdTo17StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_17_stack_deltas"`
+	ExeIdTo18StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_18_stack_deltas"`
+	ExeIdTo19StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_19_stack_deltas"`
+	ExeIdTo20StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_20_stack_deltas"`
+	ExeIdTo21StackDeltas *ebpf.MapSpec `ebpf:"exe_id_to_21_stack_deltas"`
+	ExeIdTo8StackDeltas  *ebpf.MapSpec `ebpf:"exe_id_to_8_stack_deltas"`
+	ExeIdTo9StackDeltas  *ebpf.MapSpec `ebpf:"exe_id_to_9_stack_deltas"`
+	InterpreterOffsets   *ebpf.MapSpec `ebpf:"interpreter_offsets"`
+	KernelStackmap       *ebpf.MapSpec `ebpf:"kernel_stackmap"`
+	PerCpuRecords        *ebpf.MapSpec `ebpf:"per_cpu_records"`
+	PidCache             *ebpf.MapSpec `ebpf:"pid_cache"`
+	PidPageToMappingInfo *ebpf.MapSpec `ebpf:"pid_page_to_mapping_info"`
+	Rb                   *ebpf.MapSpec `ebpf:"rb"`
+	StackDeltaArray      *ebpf.MapSpec `ebpf:"stack_delta_array"`
+	StackDeltaPageToInfo *ebpf.MapSpec `ebpf:"stack_delta_page_to_info"`
+	SystemConfig         *ebpf.MapSpec `ebpf:"system_config"`
+	UnwindInfoArray      *ebpf.MapSpec `ebpf:"unwind_info_array"`
+	ValidPids            *ebpf.MapSpec `ebpf:"valid_pids"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -115,15 +162,59 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	PidCache  *ebpf.Map `ebpf:"pid_cache"`
-	Rb        *ebpf.Map `ebpf:"rb"`
-	ValidPids *ebpf.Map `ebpf:"valid_pids"`
+	ExeIdTo10StackDeltas *ebpf.Map `ebpf:"exe_id_to_10_stack_deltas"`
+	ExeIdTo11StackDeltas *ebpf.Map `ebpf:"exe_id_to_11_stack_deltas"`
+	ExeIdTo12StackDeltas *ebpf.Map `ebpf:"exe_id_to_12_stack_deltas"`
+	ExeIdTo13StackDeltas *ebpf.Map `ebpf:"exe_id_to_13_stack_deltas"`
+	ExeIdTo14StackDeltas *ebpf.Map `ebpf:"exe_id_to_14_stack_deltas"`
+	ExeIdTo15StackDeltas *ebpf.Map `ebpf:"exe_id_to_15_stack_deltas"`
+	ExeIdTo16StackDeltas *ebpf.Map `ebpf:"exe_id_to_16_stack_deltas"`
+	ExeIdTo17StackDeltas *ebpf.Map `ebpf:"exe_id_to_17_stack_deltas"`
+	ExeIdTo18StackDeltas *ebpf.Map `ebpf:"exe_id_to_18_stack_deltas"`
+	ExeIdTo19StackDeltas *ebpf.Map `ebpf:"exe_id_to_19_stack_deltas"`
+	ExeIdTo20StackDeltas *ebpf.Map `ebpf:"exe_id_to_20_stack_deltas"`
+	ExeIdTo21StackDeltas *ebpf.Map `ebpf:"exe_id_to_21_stack_deltas"`
+	ExeIdTo8StackDeltas  *ebpf.Map `ebpf:"exe_id_to_8_stack_deltas"`
+	ExeIdTo9StackDeltas  *ebpf.Map `ebpf:"exe_id_to_9_stack_deltas"`
+	InterpreterOffsets   *ebpf.Map `ebpf:"interpreter_offsets"`
+	KernelStackmap       *ebpf.Map `ebpf:"kernel_stackmap"`
+	PerCpuRecords        *ebpf.Map `ebpf:"per_cpu_records"`
+	PidCache             *ebpf.Map `ebpf:"pid_cache"`
+	PidPageToMappingInfo *ebpf.Map `ebpf:"pid_page_to_mapping_info"`
+	Rb                   *ebpf.Map `ebpf:"rb"`
+	StackDeltaArray      *ebpf.Map `ebpf:"stack_delta_array"`
+	StackDeltaPageToInfo *ebpf.Map `ebpf:"stack_delta_page_to_info"`
+	SystemConfig         *ebpf.Map `ebpf:"system_config"`
+	UnwindInfoArray      *ebpf.Map `ebpf:"unwind_info_array"`
+	ValidPids            *ebpf.Map `ebpf:"valid_pids"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
+		m.ExeIdTo10StackDeltas,
+		m.ExeIdTo11StackDeltas,
+		m.ExeIdTo12StackDeltas,
+		m.ExeIdTo13StackDeltas,
+		m.ExeIdTo14StackDeltas,
+		m.ExeIdTo15StackDeltas,
+		m.ExeIdTo16StackDeltas,
+		m.ExeIdTo17StackDeltas,
+		m.ExeIdTo18StackDeltas,
+		m.ExeIdTo19StackDeltas,
+		m.ExeIdTo20StackDeltas,
+		m.ExeIdTo21StackDeltas,
+		m.ExeIdTo8StackDeltas,
+		m.ExeIdTo9StackDeltas,
+		m.InterpreterOffsets,
+		m.KernelStackmap,
+		m.PerCpuRecords,
 		m.PidCache,
+		m.PidPageToMappingInfo,
 		m.Rb,
+		m.StackDeltaArray,
+		m.StackDeltaPageToInfo,
+		m.SystemConfig,
+		m.UnwindInfoArray,
 		m.ValidPids,
 	)
 }

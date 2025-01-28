@@ -690,7 +690,7 @@ typedef struct PerCPURecord {
 
 // UnwindInfo contains the unwind information needed to unwind one frame
 // from a specific address.
-typedef struct UnwindInfo {
+typedef struct _UnwindInfo {
     u8 opcode;      // main opcode to unwind CFA
     u8 fpOpcode;    // opcode to unwind FP
     u8 mergeOpcode; // opcode for generating next stack delta, see below
@@ -705,7 +705,7 @@ typedef struct UnwindInfo {
 
 // An array entry that we will bsearch into that keeps address and stack unwind
 // info, per executable.
-typedef struct StackDelta {
+typedef struct _StackDelta {
     u16 addrLow;    // the low 16-bits of the ELF virtual address to which this stack delta applies
     u16 unwindInfo; // index of UnwindInfo, or UNWIND_COMMAND_* if STACK_DELTA_COMMAND_FLAG is set
 } StackDelta;
@@ -719,14 +719,14 @@ typedef struct StackDelta {
 #define STACK_DELTA_COMMAND_FLAG 0x8000
 
 // StackDeltaPageKey is the look up key for stack delta page map.
-typedef struct StackDeltaPageKey {
+typedef struct _StackDeltaPageKey {
     u64 fileID;
     u64 page;
 } StackDeltaPageKey;
 
 // StackDeltaPageInfo contains information of stack delta page so the correct map
 // and range of StackDelta entries can be found.
-typedef struct StackDeltaPageInfo {
+typedef struct _StackDeltaPageInfo {
     u32 firstDelta;
     u16 numDeltas;
     u16 mapID;

@@ -11,6 +11,7 @@
 #include "pid.h"
 #include "bpf_dbg.h"
 #include "gpuevent.h"
+#include "native_stack_trace.h"
 
 char LICENSE[] SEC("license") = "Dual MIT/GPL";
 
@@ -88,6 +89,11 @@ int BPF_KPROBE(handle_cuda_launch,
     }
 
     if (prog_cfg.capture_stack) {
+
+        int res = unwind_native(ctx);
+
+        bpf_printk("Unwind native res %d", res);
+
         // Read the Cuda Kernel Launch Stack
         e->ustack_sz =
             bpf_get_stack(ctx, e->ustack, sizeof(e->ustack), BPF_F_USER_STACK) / sizeof(uint64_t);

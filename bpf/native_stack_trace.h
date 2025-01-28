@@ -16,6 +16,10 @@
 #define __USER_DS (GDT_ENTRY_DEFAULT_USER_DS * 8 + 3)
 #endif
 
+const UnwindInfo *unused_unwind1 __attribute__((unused));
+const StackDeltaPageInfo *unused_unwind2 __attribute__((unused));
+const StackDeltaPageKey *unused_unwind3 __attribute__((unused));
+
 struct stack_delta_array {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, u32);

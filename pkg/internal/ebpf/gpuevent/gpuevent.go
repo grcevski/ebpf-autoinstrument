@@ -28,10 +28,11 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
 	"go.opentelemetry.io/ebpf-profiler/nativeunwind/elfunwindinfo"
 	sdtypes "go.opentelemetry.io/ebpf-profiler/nativeunwind/stackdeltatypes"
+	unwindsupport "go.opentelemetry.io/ebpf-profiler/support"
 )
 
-//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -target amd64,arm64 bpf ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers
-//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -target amd64,arm64 bpf_debug ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers -DBPF_DEBUG
+//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -type UnwindInfo -type StackDeltaPageKey -type StackDeltaPageInfo -target amd64,arm64 bpf ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers
+//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -type UnwindInfo -type StackDeltaPageKey -type StackDeltaPageInfo -target amd64,arm64 bpf_debug ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers -DBPF_DEBUG
 
 const EventTypeKernelLaunch = 1 // EVENT_GPU_KERNEL_LAUNCH
 const EventTypeMalloc = 2       // EVENT_GPU_MALLOC
@@ -68,6 +69,14 @@ type Tracer struct {
 	pidMap           map[pidKey]uint64
 	symbolsMap       map[uint64]moduleOffsets
 	baseMap          map[pidKey][]modInfo
+
+	// unwindInfoIndex maps each unique UnwindInfo to its array index within the corresponding
+	// BPF map. This serves for de-duplication purposes. Elements are never removed. Entries are
+	// synchronized with the unwind_info_array eBPF map.
+	unwindInfoIndex map[sdtypes.UnwindInfo]uint16
+
+	// numStackDeltaMapPages tracks the current size of the corresponding eBPF map.
+	numStackDeltaMapPages uint64
 }
 
 func New(cfg *beyla.Config, metrics imetrics.Reporter) *Tracer {
@@ -132,6 +141,9 @@ func (p *Tracer) ProcessBinary(fileInfo *exec.FileInfo) {
 		err := elfunwindinfo.ExtractELF(ref, &interval)
 		if err != nil {
 			p.log.Error("error getting stack deltas", "err", err)
+		} else {
+			r, g, e := p.loadDeltas(fileInfo.Ino, interval.Deltas)
+			p.log.Info("Load deltas", "ref", r, "gaps", g, "err", e)
 		}
 
 		p.processCudaFileInfo(fileInfo)
@@ -544,4 +556,207 @@ func (p *Tracer) findSymbolAddresses(f *elf.File) (*SymbolTree, error) {
 	p.collectSymbols(f, dynsyms, &t)
 
 	return &t, nil
+}
+
+// stack unwinding
+
+const (
+	// minimumMemoizableGapSize is the minimum size for a gap for it to be
+	// recorded. Currently reflects the V8 binary blob size, in which
+	// the gap size is >= 512kB.
+	minimumMemoizableGapSize = 512 * 1024
+)
+
+// Range describes a range with Start and End values.
+type Range struct {
+	Start uint64
+	End   uint64
+}
+
+type StackDeltaEBPF struct {
+	AddressLow uint16
+	UnwindInfo uint16
+}
+
+type mapRef struct {
+	StartPage uint64
+	NumPages  uint32
+	MapID     uint16
+}
+
+// loadDeltas converts the sdtypes.StackDelta to StackDeltaEBPF and passes that to
+// the ebpf interface to be loaded to kernel maps. While converting the deltas, it
+// also creates a list of all large gaps in the executable.
+func (p *Tracer) loadDeltas(
+	fileID uint64,
+	deltas []sdtypes.StackDelta,
+) (ref mapRef, gaps []Range, err error) {
+	numDeltas := len(deltas)
+	if numDeltas == 0 {
+		// If no deltas are extracted, cache the result but don't reserve memory in BPF maps.
+		return mapRef{MapID: 0}, []Range{}, nil
+	}
+
+	firstPage := deltas[0].Address >> unwindsupport.StackDeltaPageBits
+	firstPageAddr := deltas[0].Address &^ unwindsupport.StackDeltaPageMask
+	lastPage := deltas[numDeltas-1].Address >> unwindsupport.StackDeltaPageBits
+	numPages := lastPage - firstPage + 1
+	numDeltasPerPage := make([]uint16, numPages)
+
+	// Index the unwind-info.
+	var unwindInfo sdtypes.UnwindInfo
+	ebpfDeltas := make([]StackDeltaEBPF, 0, numDeltas)
+	for index, delta := range deltas {
+		if unwindInfo.MergeOpcode != 0 {
+			// This delta was merged in the previous iteration.
+			unwindInfo.MergeOpcode = 0
+			continue
+		}
+		unwindInfo = delta.Info
+		if index+1 < len(deltas) {
+			unwindInfo.MergeOpcode = p.calculateMergeOpcode(delta, deltas[index+1])
+			nextDeltaAddr := deltas[index+1].Address
+			if delta.Hints&sdtypes.UnwindHintGap != 0 &&
+				nextDeltaAddr-delta.Address >= minimumMemoizableGapSize {
+				// Remember large gaps so ProcessManager plugins can
+				// later use them to find precompiled blobs without deltas.
+				gaps = append(gaps, Range{
+					Start: delta.Address,
+					End:   nextDeltaAddr})
+			}
+		}
+		// Uses the new 'unwindInfo' with potentially updated MergeOpcode
+		// here. In the end, it's only the unwindInfoIndex being different for
+		// merged deltas.
+		var unwindInfoIndex uint16
+		unwindInfoIndex, err = p.getUnwindInfoIndex(unwindInfo)
+		if err != nil {
+			return mapRef{}, nil, err
+		}
+		ebpfDeltas = append(ebpfDeltas, StackDeltaEBPF{
+			AddressLow: uint16(delta.Address),
+			UnwindInfo: unwindInfoIndex,
+		})
+		numDeltasPerPage[(delta.Address>>unwindsupport.StackDeltaPageBits)-firstPage]++
+	}
+
+	// Update data to eBPF
+	mapID, err := p.UpdateExeIDToStackDeltas(fileID, ebpfDeltas)
+	if err != nil {
+		return mapRef{}, nil,
+			fmt.Errorf("failed UpdateExeIDToStackDeltas for FileID %x: %v", fileID, err)
+	}
+
+	// Update stack delta pages
+	if err = p.UpdateStackDeltaPages(fileID, numDeltasPerPage, mapID,
+		firstPageAddr); err != nil {
+		_ = p.DeleteExeIDToStackDeltas(fileID)
+		return mapRef{}, nil,
+			fmt.Errorf("failed UpdateStackDeltaPages for FileID %x: %v", fileID, err)
+	}
+	p.numStackDeltaMapPages += numPages
+
+	return mapRef{
+		MapID:     mapID,
+		StartPage: firstPageAddr,
+		NumPages:  uint32(numPages),
+	}, gaps, nil
+}
+
+// calculateMergeOpcode calculates the merge opcode byte given two consecutive StackDeltas.
+// Zero means no merging happened. Only small differences for address and the CFA delta
+// are considered, in order to limit the amount of unique combinations generated.
+func (p *Tracer) calculateMergeOpcode(delta, nextDelta sdtypes.StackDelta) uint8 {
+	if delta.Info.Opcode == sdtypes.UnwindOpcodeCommand {
+		return 0
+	}
+	addrDiff := nextDelta.Address - delta.Address
+	if addrDiff < 1 || addrDiff > 2 {
+		return 0
+	}
+	if nextDelta.Info.Opcode != delta.Info.Opcode ||
+		nextDelta.Info.FPOpcode != delta.Info.FPOpcode ||
+		nextDelta.Info.FPParam != delta.Info.FPParam {
+		return 0
+	}
+	paramDiff := nextDelta.Info.Param - delta.Info.Param
+	switch paramDiff {
+	case 8:
+		return uint8(addrDiff)
+	case -8:
+		return uint8(addrDiff) | unwindsupport.MergeOpcodeNegative
+	}
+	return 0
+}
+
+// getUnwindInfoIndex maps the given UnwindInfo to its eBPF array index. This can be direct
+// encoding, or index to the unwind info array (new index is created if needed).
+// See STACK_DELTA_COMMAND_FLAG for further explanation of the directly encoded unwind infos.
+func (p *Tracer) getUnwindInfoIndex(
+	info sdtypes.UnwindInfo,
+) (uint16, error) {
+	if info.Opcode == sdtypes.UnwindOpcodeCommand {
+		return uint16(info.Param) | unwindsupport.DeltaCommandFlag, nil
+	}
+
+	if index, ok := p.unwindInfoIndex[info]; ok {
+		return index, nil
+	}
+	index := uint16(len(p.unwindInfoIndex))
+	if err := p.UpdateUnwindInfo(index, info); err != nil {
+		return 0, fmt.Errorf("failed to insert unwind info #%d: %v", index, err)
+	}
+	p.unwindInfoIndex[info] = index
+	return index, nil
+}
+
+func (p *Tracer) UpdateUnwindInfo(index uint16, info sdtypes.UnwindInfo) error {
+	i := bpfUnwindInfo{}
+	i.Opcode = info.Opcode
+	i.FpOpcode = info.FPOpcode
+	i.MergeOpcode = info.MergeOpcode
+	i.Param = info.Param
+	i.FpParam = info.FPParam
+
+	return p.bpfObjects.UnwindInfoArray.Put(index, i)
+}
+
+func (p *Tracer) UpdateExeIDToStackDeltas(index uint64, deltaArrays []StackDeltaEBPF) (uint16, error) {
+	for index, delta := range deltaArrays {
+		d := bpfStackDelta{}
+		d.AddrLow = delta.AddressLow
+		d.UnwindInfo = delta.UnwindInfo
+		if err := p.bpfObjects.StackDeltaArray.Put(index, d); err != nil {
+			return 0, err
+		}
+	}
+
+	return unwindsupport.StackDeltaBucketSmallest, nil
+}
+
+func (p *Tracer) UpdateStackDeltaPages(fileID uint64, numDeltasPerPage []uint16, mapID uint16, firstPageAddr uint64) error {
+	firstDelta := uint32(0)
+
+	for pageNumber, numDeltas := range numDeltasPerPage {
+		k := bpfStackDeltaPageKey{}
+		k.FileID = fileID
+		k.Page = uint64(pageNumber)
+
+		v := bpfStackDeltaPageInfo{}
+		v.FirstDelta = firstDelta
+		v.NumDeltas = numDeltas
+		v.MapID = mapID
+
+		if err := p.bpfObjects.StackDeltaPageToInfo.Put(k, v); err != nil {
+			return err
+		}
+
+		firstDelta += uint32(numDeltas)
+	}
+
+	return nil
+}
+
+func (p *Tracer) DeleteExeIDToStackDeltas(fileID uint64) error {
+	return p.bpfObjects.StackDeltaArray.Delete(fileID)
 }
