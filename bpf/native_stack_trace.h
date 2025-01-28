@@ -24,7 +24,7 @@ struct stack_delta_array {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, u32);
     __type(value, StackDelta);
-    __uint(max_entries, 8192);
+    __uint(max_entries, 80000);
 } stack_delta_array SEC(".maps");
 
 // Macro to create a map named exe_id_to_X_stack_deltas that is a nested maps with a fileID for the
@@ -99,10 +99,8 @@ struct bpf_map_def SEC("maps") kernel_stackmap = {
 };
 
 // Record a native frame
-static inline __attribute__((__always_inline__)) ErrorCode push_native(Trace *trace,
-                                                                       u64 file,
-                                                                       u64 line,
-                                                                       bool return_address) {
+static inline __attribute__((__always_inline__)) ErrorCode
+push_native(Trace *trace, u64 file, u64 line, bool return_address) {
     return _push_with_return_address(trace, file, line, FRAME_MARKER_NATIVE, return_address);
 }
 
@@ -303,10 +301,8 @@ static ErrorCode get_stack_delta(UnwindState *state, int *addrDiff, u32 *unwindI
 //      BASE + param
 //   3. When UNWIND_OPCODEF_DEREF is set:
 //      *(BASE + preDeref) + postDeref
-static inline __attribute__((__always_inline__)) u64 unwind_register_address(UnwindState *state,
-                                                                             u64 cfa,
-                                                                             u8 opcode,
-                                                                             s32 param) {
+static inline __attribute__((__always_inline__)) u64
+unwind_register_address(UnwindState *state, u64 cfa, u8 opcode, s32 param) {
     unsigned long addr, val;
     s32 preDeref = param, postDeref = 0;
 

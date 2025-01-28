@@ -77,6 +77,8 @@ type Tracer struct {
 
 	// numStackDeltaMapPages tracks the current size of the corresponding eBPF map.
 	numStackDeltaMapPages uint64
+
+	spec *ebpf.CollectionSpec
 }
 
 func New(cfg *beyla.Config, metrics imetrics.Reporter) *Tracer {
@@ -92,6 +94,7 @@ func New(cfg *beyla.Config, metrics imetrics.Reporter) *Tracer {
 		pidMap:           map[pidKey]uint64{},
 		symbolsMap:       map[uint64]moduleOffsets{},
 		baseMap:          map[pidKey][]modInfo{},
+		unwindInfoIndex:  map[sdtypes.UnwindInfo]uint16{},
 	}
 }
 
@@ -110,7 +113,11 @@ func (p *Tracer) Load() (*ebpf.CollectionSpec, error) {
 		loader = loadBpf_debug
 	}
 
-	return loader()
+	s, err := loader()
+
+	p.spec = s
+
+	return s, err
 }
 
 func (p *Tracer) Constants() map[string]any {
@@ -136,16 +143,7 @@ func (p *Tracer) ProcessBinary(fileInfo *exec.FileInfo) {
 	if fileInfo == nil || fileInfo.ELF == nil {
 		p.log.Error("Empty fileinfo for Cuda")
 	} else {
-		var interval sdtypes.IntervalData
-		ref := pfelf.NewReference(fileInfo.CmdExePath, pfelf.SystemOpener)
-		err := elfunwindinfo.ExtractELF(ref, &interval)
-		if err != nil {
-			p.log.Error("error getting stack deltas", "err", err)
-		} else {
-			r, g, e := p.loadDeltas(fileInfo.Ino, interval.Deltas)
-			p.log.Info("Load deltas", "ref", r, "gaps", g, "err", e)
-		}
-
+		p.processDeltas(fileInfo)
 		p.processCudaFileInfo(fileInfo)
 	}
 }
@@ -233,6 +231,18 @@ func (p *Tracer) AlreadyInstrumentedLib(id uint64) bool {
 
 	p.log.Debug("checking already instrumented Lib", "ino", id, "module", module)
 	return module != nil
+}
+
+func (p *Tracer) processDeltas(fileInfo *exec.FileInfo) {
+	var interval sdtypes.IntervalData
+	ref := pfelf.NewReference(fileInfo.CmdExePath, pfelf.SystemOpener)
+	err := elfunwindinfo.ExtractELF(ref, &interval)
+	if err != nil {
+		p.log.Error("error getting stack deltas", "err", err)
+	} else {
+		r, g, e := p.loadDeltas(fileInfo.Ino, interval.Deltas)
+		p.log.Info("Load deltas", "ref", r, "gaps", g, "err", e)
+	}
 }
 
 func (p *Tracer) Run(ctx context.Context, eventsChan chan<- []request.Span) {
@@ -718,15 +728,43 @@ func (p *Tracer) UpdateUnwindInfo(index uint16, info sdtypes.UnwindInfo) error {
 	i.Param = info.Param
 	i.FpParam = info.FPParam
 
-	return p.bpfObjects.UnwindInfoArray.Put(index, i)
+	ind := uint32(index)
+
+	return p.bpfObjects.UnwindInfoArray.Put(ind, i)
 }
 
-func (p *Tracer) UpdateExeIDToStackDeltas(index uint64, deltaArrays []StackDeltaEBPF) (uint16, error) {
+func (p *Tracer) UpdateExeIDToStackDeltas(fileID uint64, deltaArrays []StackDeltaEBPF) (uint16, error) {
+	m := 0
+	var mm *ebpf.Map
+	mspec, ok := p.spec.Maps["stack_delta_array"]
+	if !ok {
+		return 0, fmt.Errorf("can't find stack_delta_array")
+	}
+	
+	if err := p.bpfObjects.ExeIdTo8StackDeltas.Lookup(fileID, &m); err != nil {		
+		mm, err = ebpf.NewMap(mspec)
+		if err != nil {
+			return 0, err
+		}
+		if err = p.bpfObjects.ExeIdTo8StackDeltas.Put(fileID, mm); err != nil {
+			return 0, fmt.Errorf("can't update delta map %v", err)
+		}
+	} else {
+		mm, err = ebpf.NewMapFromFD(m)
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	for index, delta := range deltaArrays {
 		d := bpfStackDelta{}
 		d.AddrLow = delta.AddressLow
 		d.UnwindInfo = delta.UnwindInfo
-		if err := p.bpfObjects.StackDeltaArray.Put(index, d); err != nil {
+		i := uint32(index)
+		if i >= mspec.MaxEntries {
+			break
+		}
+		if err := mm.Put(uint32(i), &d); err != nil {
 			return 0, err
 		}
 	}
