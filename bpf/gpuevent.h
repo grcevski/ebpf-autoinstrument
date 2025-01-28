@@ -37,4 +37,11 @@ typedef struct gpu_malloc {
     pid_info pid_info;
 } __attribute__((packed)) gpu_malloc_t;
 
+typedef struct gpu_memcpy {
+    u8 flags; // Must be first, we use it to tell what kind of packet we have on the ring buffer
+    u64 size;
+    u8 kind;
+    pid_info pid_info;
+} __attribute__((packed)) gpu_memcpy_t;
+
 #endif

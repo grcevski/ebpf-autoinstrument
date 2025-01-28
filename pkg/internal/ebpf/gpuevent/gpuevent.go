@@ -31,8 +31,8 @@ import (
 	unwindsupport "go.opentelemetry.io/ebpf-profiler/support"
 )
 
-//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -type UnwindInfo -type StackDeltaPageKey -type StackDeltaPageInfo -target amd64,arm64 bpf ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers
-//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -type UnwindInfo -type StackDeltaPageKey -type StackDeltaPageInfo -target amd64,arm64 bpf_debug ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers -DBPF_DEBUG
+//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -type gpu_memcpy_t -type UnwindInfo -type StackDeltaPageKey -type StackDeltaPageInfo -target amd64,arm64 bpf ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers
+//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type gpu_kernel_launch_t -type gpu_malloc_t -type gpu_memcpy_t -type UnwindInfo -type StackDeltaPageKey -type StackDeltaPageInfo -target amd64,arm64 bpf_debug ../../../../bpf/gpuevent.c -- -I../../../../bpf/headers -DBPF_DEBUG
 
 const EventTypeKernelLaunch = 1 // EVENT_GPU_KERNEL_LAUNCH
 const EventTypeMalloc = 2       // EVENT_GPU_MALLOC
