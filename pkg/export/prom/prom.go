@@ -176,6 +176,7 @@ type metricsReporter struct {
 	attrGPUMemoryAllocs       []attributes.Field[*request.Span, string]
 	attrGPUKernelGridSize     []attributes.Field[*request.Span, string]
 	attrGPUKernelBlockSize    []attributes.Field[*request.Span, string]
+	attrGPUMemoryCopies       []attributes.Field[*request.Span, string]
 
 	// trace span metrics
 	spanMetricsLatency    *Expirer[prometheus.Histogram]
@@ -194,6 +195,7 @@ type metricsReporter struct {
 	gpuMemoryAllocsTotal *Expirer[prometheus.Counter]
 	gpuKernelGridSize    *Expirer[prometheus.Histogram]
 	gpuKernelBlockSize   *Expirer[prometheus.Histogram]
+	gpuMemoryCopySize    *Expirer[prometheus.Histogram]
 
 	promConnect *connector.PrometheusManager
 
@@ -289,6 +291,7 @@ func newReporter(
 	var attrGPUMemoryAllocations []attributes.Field[*request.Span, string]
 	var attrGPUKernelGridSize []attributes.Field[*request.Span, string]
 	var attrGPUKernelBlockSize []attributes.Field[*request.Span, string]
+	var attrGPUMemoryCopies []attributes.Field[*request.Span, string]
 
 	if is.GPUEnabled() {
 		attrGPUKernelLaunchCalls = attributes.PrometheusGetters(request.SpanPromGetters,
@@ -299,6 +302,8 @@ func newReporter(
 			attrsProvider.For(attributes.GPUKernelGridSize))
 		attrGPUKernelBlockSize = attributes.PrometheusGetters(request.SpanPromGetters,
 			attrsProvider.For(attributes.GPUKernelBlockSize))
+		attrGPUMemoryCopies = attributes.PrometheusGetters(request.SpanPromGetters,
+			attrsProvider.For(attributes.GPUMemoryCopies))
 	}
 
 	clock := expire.NewCachedClock(timeNow)
@@ -325,6 +330,7 @@ func newReporter(
 		attrHTTPClientRequestSize: attrHTTPClientRequestSize,
 		attrGPUKernelCalls:        attrGPUKernelLaunchCalls,
 		attrGPUMemoryAllocs:       attrGPUMemoryAllocations,
+		attrGPUMemoryCopies:       attrGPUMemoryCopies,
 		beylaInfo: NewExpirer[prometheus.Gauge](prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: BeylaBuildInfo,
 			Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
@@ -524,6 +530,16 @@ func newReporter(
 				NativeHistogramMinResetDuration: defaultHistogramMinResetDuration,
 			}, labelNames(attrGPUKernelBlockSize)).MetricVec, clock.Time, cfg.TTL)
 		}),
+		gpuMemoryCopySize: optionalHistogramProvider(is.GPUEnabled(), func() *Expirer[prometheus.Histogram] {
+			return NewExpirer[prometheus.Histogram](prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Name:                            attributes.GPUMemoryCopies.Prom,
+				Help:                            "amount of GPU to and from memory copies",
+				Buckets:                         cfg.Buckets.RequestSizeHistogram,
+				NativeHistogramBucketFactor:     defaultHistogramBucketFactor,
+				NativeHistogramMaxBucketNumber:  defaultHistogramMaxBucketNumber,
+				NativeHistogramMinResetDuration: defaultHistogramMinResetDuration,
+			}, labelNames(attrGPUMemoryCopies)).MetricVec, clock.Time, cfg.TTL)
+		}),
 	}
 
 	if cfg.SpanMetricsEnabled() {
@@ -594,6 +610,7 @@ func newReporter(
 			mr.gpuMemoryAllocsTotal,
 			mr.gpuKernelGridSize,
 			mr.gpuKernelBlockSize,
+			mr.gpuMemoryCopySize,
 		)
 	}
 
@@ -734,6 +751,12 @@ func (r *metricsReporter) observe(span *request.Span) {
 				r.gpuMemoryAllocsTotal.WithLabelValues(
 					labelValues(span, r.attrGPUMemoryAllocs)...,
 				).metric.Add(float64(span.ContentLength))
+			}
+		case request.EventTypeGPUMemcpy:
+			if r.is.GPUEnabled() {
+				r.gpuMemoryCopySize.WithLabelValues(
+					labelValues(span, r.attrGPUMemoryCopies)...,
+				).metric.Observe(float64(span.ContentLength))
 			}
 		}
 	}

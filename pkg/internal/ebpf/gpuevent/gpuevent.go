@@ -36,6 +36,7 @@ import (
 
 const EventTypeKernelLaunch = 1 // EVENT_GPU_KERNEL_LAUNCH
 const EventTypeMalloc = 2       // EVENT_GPU_MALLOC
+const EventTypeMemcpy = 3       // EVENT_GPU_MEMCPY
 
 type pidKey struct {
 	Pid int32
@@ -52,6 +53,7 @@ type moduleOffsets map[uint64]*SymbolTree
 
 type GPUKernelLaunchInfo bpfGpuKernelLaunchT
 type GPUMallocInfo bpfGpuMallocT
+type GPUMemcpyInfo bpfGpuMemcpyT
 
 // TODO: We have a way to bring ELF file information to this Tracer struct
 // via the newNonGoTracersGroup / newNonGoTracersGroupUProbes functions. Now,
@@ -271,6 +273,8 @@ func (p *Tracer) processCudaEvent(_ *config.EBPFTracer, record *ringbuf.Record, 
 		return p.readGPUKernelLaunchIntoSpan(record)
 	case EventTypeMalloc:
 		return p.readGPUMallocIntoSpan(record)
+	case EventTypeMemcpy:
+		return p.readGPUMemcpyIntoSpan(record)
 	default:
 		p.log.Error("unknown cuda event")
 	}
@@ -290,6 +294,22 @@ func (p *Tracer) readGPUMallocIntoSpan(record *ringbuf.Record) (request.Span, bo
 	return request.Span{
 		Type:          request.EventTypeGPUMalloc,
 		ContentLength: int64(event.Size),
+	}, false, nil
+}
+
+func (p *Tracer) readGPUMemcpyIntoSpan(record *ringbuf.Record) (request.Span, bool, error) {
+	var event GPUMemcpyInfo
+	if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
+		return request.Span{}, true, err
+	}
+
+	// Log the GPU Kernel Launch event
+	p.log.Debug("GPU Memcpy", "event", event)
+
+	return request.Span{
+		Type:          request.EventTypeGPUMemcpy,
+		ContentLength: int64(event.Size),
+		SubType:       int(event.Kind),
 	}, false, nil
 }
 
@@ -742,8 +762,8 @@ func (p *Tracer) UpdateExeIDToStackDeltas(fileID uint64, deltaArrays []StackDelt
 	if !ok {
 		return 0, fmt.Errorf("can't find stack_delta_array")
 	}
-	
-	if err := p.bpfObjects.ExeIdTo8StackDeltas.Lookup(fileID, &m); err != nil {		
+
+	if err := p.bpfObjects.ExeIdTo8StackDeltas.Lookup(fileID, &m); err != nil {
 		mm, err = ebpf.NewMap(mspec)
 		if err != nil {
 			return 0, err

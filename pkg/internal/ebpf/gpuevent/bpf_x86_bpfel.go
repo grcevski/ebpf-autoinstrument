@@ -42,6 +42,17 @@ type bpfGpuMallocT struct {
 	}
 }
 
+type bpfGpuMemcpyT struct {
+	Flags   uint8
+	Size    uint64
+	Kind    uint8
+	PidInfo struct {
+		HostPid uint32
+		UserPid uint32
+		Ns      uint32
+	}
+}
+
 type bpfStackDelta struct {
 	AddrLow    uint16
 	UnwindInfo uint16
@@ -110,6 +121,7 @@ type bpfSpecs struct {
 type bpfProgramSpecs struct {
 	HandleCudaLaunch *ebpf.ProgramSpec `ebpf:"handle_cuda_launch"`
 	HandleCudaMalloc *ebpf.ProgramSpec `ebpf:"handle_cuda_malloc"`
+	HandleCudaMemcpy *ebpf.ProgramSpec `ebpf:"handle_cuda_memcpy"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
@@ -225,12 +237,14 @@ func (m *bpfMaps) Close() error {
 type bpfPrograms struct {
 	HandleCudaLaunch *ebpf.Program `ebpf:"handle_cuda_launch"`
 	HandleCudaMalloc *ebpf.Program `ebpf:"handle_cuda_malloc"`
+	HandleCudaMemcpy *ebpf.Program `ebpf:"handle_cuda_memcpy"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
 		p.HandleCudaLaunch,
 		p.HandleCudaMalloc,
+		p.HandleCudaMemcpy,
 	)
 }
 
