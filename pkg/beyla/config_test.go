@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"strings"
@@ -55,11 +56,8 @@ attributes:
     kubeconfig_path: /foo/bar
     enable: true
     informers_sync_timeout: 30s
-    meta_naming_sources:
-      annotations:
-        service_namespace: ["huha.com/yeah"]
-      labels:
-        service_name: ["titi.com/lala"]
+    resource_labels:
+      service.namespace: ["huha.com/yeah"]
   instance_id:
     dns: true
   host_id:
@@ -108,9 +106,8 @@ network:
 	nc.AgentIP = "1.2.3.4"
 	nc.CIDRs = cidr.Definitions{"10.244.0.0/16"}
 
-	metaSources := kube.DefaultMetadataSources
-	metaSources.Annotations.ServiceNamespace = []string{"huha.com/yeah"}
-	metaSources.Labels.ServiceName = []string{"titi.com/lala"}
+	metaSources := maps.Clone(kube.DefaultResourceLabels)
+	metaSources["service.namespace"] = []string{"huha.com/yeah"}
 
 	assert.Equal(t, &Config{
 		Exec:             cfg.Exec,
@@ -119,13 +116,13 @@ network:
 		ChannelBufferLen: 33,
 		LogLevel:         "INFO",
 		EnforceSysCaps:   false,
-		Printer:          false,
 		TracePrinter:     "json",
 		EBPF: config.EBPFTracer{
-			BatchLength:        100,
-			BatchTimeout:       time.Second,
-			HTTPRequestTimeout: 30 * time.Second,
-			TCBackend:          tcmanager.TCBackendAuto,
+			BatchLength:               100,
+			BatchTimeout:              time.Second,
+			HTTPRequestTimeout:        30 * time.Second,
+			TCBackend:                 tcmanager.TCBackendAuto,
+			ContextPropagationEnabled: false,
 		},
 		Grafana: otel.GrafanaConfig{
 			OTLP: otel.GrafanaOTLP{
@@ -148,7 +145,7 @@ network:
 				instrumentations.InstrumentationALL,
 			},
 			HistogramAggregation: "base2_exponential_bucket_histogram",
-			TTL:                  defaultMetricsTTL,
+			TTL:                  5 * time.Minute,
 		},
 		Traces: otel.TracesConfig{
 			Protocol:           otel.ProtocolUnset,
@@ -189,7 +186,7 @@ network:
 				Enable:                kubeflags.EnabledTrue,
 				InformersSyncTimeout:  30 * time.Second,
 				InformersResyncPeriod: 30 * time.Minute,
-				MetadataSources:       metaSources,
+				ResourceLabels:        metaSources,
 			},
 			HostID: HostIDConfig{
 				Override:     "the-host-id",
@@ -217,7 +214,11 @@ network:
 		},
 		Discovery: services.DiscoveryConfig{
 			ExcludeOTelInstrumentedServices: true,
-			ExcludeSystemServices:           `.*alloy.*|.*otelcol.*|.*beyla.*`,
+			DefaultExcludeServices: services.DefinitionCriteria{
+				services.Attributes{
+					Path: services.NewPathRegexp(regexp.MustCompile("(?:^|/)(beyla$|alloy$|otelcol[^/]*$)")),
+				},
+			},
 		},
 	}, cfg)
 }
@@ -236,10 +237,6 @@ func TestConfigValidate(t *testing.T) {
 		{"OTEL_EXPORTER_OTLP_ENDPOINT": "localhost:1234", "BEYLA_EXECUTABLE_NAME": "foo", "INSTRUMENT_FUNC_NAME": "bar"},
 		{"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "localhost:1234", "BEYLA_EXECUTABLE_NAME": "foo", "INSTRUMENT_FUNC_NAME": "bar"},
 		{"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "localhost:1234", "BEYLA_EXECUTABLE_NAME": "foo", "INSTRUMENT_FUNC_NAME": "bar"},
-		{"BEYLA_PRINT_TRACES": "true", "BEYLA_EXECUTABLE_NAME": "foo", "INSTRUMENT_FUNC_NAME": "bar"},
-		{"BEYLA_PRINT_TRACES": "true", "BEYLA_TRACE_PRINTER": "disabled", "BEYLA_EXECUTABLE_NAME": "foo"},
-		{"BEYLA_PRINT_TRACES": "true", "BEYLA_TRACE_PRINTER": "", "BEYLA_EXECUTABLE_NAME": "foo"},
-		{"BEYLA_PRINT_TRACES": "false", "BEYLA_TRACE_PRINTER": "text", "BEYLA_EXECUTABLE_NAME": "foo"},
 		{"BEYLA_TRACE_PRINTER": "text", "BEYLA_EXECUTABLE_NAME": "foo"},
 		{"BEYLA_TRACE_PRINTER": "json", "BEYLA_EXECUTABLE_NAME": "foo"},
 		{"BEYLA_TRACE_PRINTER": "json_indent", "BEYLA_EXECUTABLE_NAME": "foo"},
@@ -258,11 +255,9 @@ func TestConfigValidate(t *testing.T) {
 func TestConfigValidate_error(t *testing.T) {
 	testCases := []envMap{
 		{"OTEL_EXPORTER_OTLP_ENDPOINT": "localhost:1234", "INSTRUMENT_FUNC_NAME": "bar"},
-		{"BEYLA_EXECUTABLE_NAME": "foo", "INSTRUMENT_FUNC_NAME": "bar", "BEYLA_PRINT_TRACES": "false"},
-		{"BEYLA_EXECUTABLE_NAME": "foo", "BEYLA_PRINT_TRACES": "true", "BEYLA_TRACE_PRINTER": "text"},
-		{"BEYLA_EXECUTABLE_NAME": "foo", "BEYLA_PRINT_TRACES": "true", "BEYLA_TRACE_PRINTER": "json"},
-		{"BEYLA_EXECUTABLE_NAME": "foo", "BEYLA_PRINT_TRACES": "true", "BEYLA_TRACE_PRINTER": "json_indent"},
-		{"BEYLA_EXECUTABLE_NAME": "foo", "BEYLA_PRINT_TRACES": "true", "BEYLA_TRACE_PRINTER": "counter"},
+		{"BEYLA_EXECUTABLE_NAME": "foo", "INSTRUMENT_FUNC_NAME": "bar", "BEYLA_TRACE_PRINTER": "disabled"},
+		{"BEYLA_EXECUTABLE_NAME": "foo", "INSTRUMENT_FUNC_NAME": "bar", "BEYLA_TRACE_PRINTER": ""},
+		{"BEYLA_EXECUTABLE_NAME": "foo", "INSTRUMENT_FUNC_NAME": "bar", "BEYLA_TRACE_PRINTER": "invalid"},
 	}
 	for n, tc := range testCases {
 		t.Run(fmt.Sprint("case", n), func(t *testing.T) {
@@ -339,10 +334,6 @@ func TestConfigValidate_TracePrinter(t *testing.T) {
 			errorMsg: "invalid value for trace_printer: 'invalid_printer'",
 		},
 		{
-			env:      envMap{"BEYLA_EXECUTABLE_NAME": "foo", "BEYLA_TRACE_PRINTER": "json", "BEYLA_PRINT_TRACES": "true"},
-			errorMsg: "print_traces and trace_printer are mutually exclusive, use trace_printer instead",
-		},
-		{
 			env:      envMap{"BEYLA_EXECUTABLE_NAME": "foo"},
 			errorMsg: "you need to define at least one exporter: trace_printer, grafana, otel_metrics_export, otel_traces_export or prometheus_export",
 		},
@@ -359,7 +350,7 @@ func TestConfigValidate_TracePrinter(t *testing.T) {
 }
 
 func TestConfigValidate_TracePrinterFallback(t *testing.T) {
-	env := envMap{"BEYLA_EXECUTABLE_NAME": "foo", "BEYLA_PRINT_TRACES": "true"}
+	env := envMap{"BEYLA_EXECUTABLE_NAME": "foo", "BEYLA_TRACE_PRINTER": "text"}
 
 	cfg := loadConfig(t, env)
 
@@ -367,7 +358,6 @@ func TestConfigValidate_TracePrinterFallback(t *testing.T) {
 
 	err := cfg.Validate()
 	require.NoError(t, err)
-	assert.True(t, cfg.Printer.Enabled())
 	assert.Equal(t, cfg.TracePrinter, debug.TracePrinterText)
 }
 
@@ -491,6 +481,27 @@ time=\S+ level=DEBUG msg=debug arg=debug$`),
 			assert.Equal(t, tc.expectedCfg, cfg)
 		})
 	}
+}
+
+func TestDefaultExclusionFilter(t *testing.T) {
+	c := DefaultConfig.Discovery.DefaultExcludeServices
+
+	assert.True(t, c[0].Path.MatchString("beyla"))
+	assert.True(t, c[0].Path.MatchString("alloy"))
+	assert.True(t, c[0].Path.MatchString("otelcol-contrib"))
+
+	assert.False(t, c[0].Path.MatchString("/usr/bin/beyla/test"))
+	assert.False(t, c[0].Path.MatchString("/usr/bin/alloy/test"))
+	assert.False(t, c[0].Path.MatchString("/usr/bin/otelcol-contrib/test"))
+
+	assert.True(t, c[0].Path.MatchString("/beyla"))
+	assert.True(t, c[0].Path.MatchString("/alloy"))
+	assert.True(t, c[0].Path.MatchString("/otelcol-contrib"))
+
+	assert.True(t, c[0].Path.MatchString("/usr/bin/beyla"))
+	assert.True(t, c[0].Path.MatchString("/usr/bin/alloy"))
+	assert.True(t, c[0].Path.MatchString("/usr/bin/otelcol-contrib"))
+	assert.True(t, c[0].Path.MatchString("/usr/bin/otelcol-contrib123"))
 }
 
 func loadConfig(t *testing.T, env envMap) *Config {

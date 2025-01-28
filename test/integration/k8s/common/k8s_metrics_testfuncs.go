@@ -114,10 +114,22 @@ func FeatureHTTPMetricsDecoration(manifest string, overrideAttrs map[string]stri
 		"k8s_replicaset_name":      "^testserver-",
 		"k8s_cluster_name":         "^beyla$",
 		"server_service_namespace": "integration-test",
+		"server":                   "testserver",
 		"source":                   "beyla",
 		"host_name":                "testserver",
 		"host_id":                  HostIDRegex,
+		"deployment_environment":   "integration-test",
 	}
+	// if service_instance_id is overridden to be empty, we will check that value for target_info{instance} instead
+	if overrideAttrs != nil {
+		if sid, ok := overrideAttrs["service_instance_id"]; ok && sid == "" {
+			allAttributes["instance"] = sid
+		}
+	}
+	overriddenNameNS := attributeMap(allAttributes, overrideAttrs, "server", "server_service_namespace")
+	expectedServer := overriddenNameNS["server"]
+	expectedNs := overriddenNameNS["server_service_namespace"]
+	expectedJob := expectedNs + "/" + expectedServer
 
 	return features.New("Decoration of Pod-to-Service communications").
 		Setup(pinger.Deploy()).
@@ -144,15 +156,16 @@ func FeatureHTTPMetricsDecoration(manifest string, overrideAttrs map[string]stri
 					"k8s_cluster_name",
 				))).
 		Assess("all the span graph metrics exist",
-			testMetricsDecoration(spanGraphMetrics, `{server="testserver",client="internal-pinger"}`,
+			testMetricsDecoration(spanGraphMetrics, `{server="`+expectedServer+`",server_service_namespace="`+expectedNs+`",client="internal-pinger"}`,
 				attributeMap(allAttributes, overrideAttrs,
 					"server_service_namespace",
 					"source",
 				))).Assess("target_info metrics exist",
-		testMetricsDecoration([]string{"target_info"}, `{job=~".*testserver"}`,
+		testMetricsDecoration([]string{"target_info"}, `{job="`+expectedJob+`"}`,
 			attributeMap(allAttributes, overrideAttrs,
 				"host_name",
 				"host_id",
+				"instance",
 			)),
 	).Feature()
 }
@@ -175,7 +188,7 @@ func attributeMap(original, override map[string]string, fields ...string) map[st
 	return result
 }
 
-func FeatureGRPCMetricsDecoration(manifest string) features.Feature {
+func FeatureGRPCMetricsDecoration(manifest string, overrideAttrs map[string]string) features.Feature {
 	pinger := kube.Template[Pinger]{
 		TemplateFile: manifest,
 		Data: Pinger{
@@ -183,32 +196,40 @@ func FeatureGRPCMetricsDecoration(manifest string) features.Feature {
 			TargetURL: "testserver:5051",
 		},
 	}
+
+	allAttributes := map[string]string{
+		"k8s_namespace_name":     "^default$",
+		"k8s_node_name":          ".+-control-plane$",
+		"k8s_pod_uid":            UUIDRegex,
+		"k8s_pod_start_time":     TimeRegex,
+		"k8s_cluster_name":       "^beyla$",
+		"k8s_owner_name":         "^testserver$",
+		"k8s_deployment_name":    "^testserver$",
+		"k8s_replicaset_name":    "^testserver-",
+		"service_instance_id":    "^default\\.testserver-.+\\.testserver",
+		"deployment_environment": "integration-test",
+	}
+	// if service_instance_id is overridden to be empty, we will check that value for target_info{instance} instead
+	targetInfoInstance := ""
+	if overrideAttrs != nil {
+		if sid, ok := overrideAttrs["service_instance_id"]; ok && sid == "" {
+			targetInfoInstance = allAttributes["service_instance_id"]
+		}
+	}
 	return features.New("Decoration of Pod-to-Service communications").
 		Setup(pinger.Deploy()).
 		Teardown(pinger.Delete()).
 		Assess("all the client metrics are properly decorated",
-			testMetricsDecoration(grpcClientMetrics, `{k8s_pod_name="internal-grpc-pinger"}`, map[string]string{
-				"k8s_namespace_name": "^default$",
-				"k8s_node_name":      ".+-control-plane$",
-				"k8s_pod_uid":        UUIDRegex,
-				"k8s_pod_start_time": TimeRegex,
-				"k8s_cluster_name":   "^beyla$",
-			}, "k8s_deployment_name")).
+			testMetricsDecoration(grpcClientMetrics, `{k8s_pod_name="internal-grpc-pinger"}`,
+				attributeMap(allAttributes, overrideAttrs), "k8s_deployment_name")).
 		Assess("all the server metrics are properly decorated",
-			testMetricsDecoration(grpcServerMetrics, `{k8s_pod_name=~"testserver-.*"}`, map[string]string{
-				"k8s_namespace_name":  "^default$",
-				"k8s_node_name":       ".+-control-plane$",
-				"k8s_pod_uid":         UUIDRegex,
-				"k8s_pod_start_time":  TimeRegex,
-				"k8s_owner_name":      "^testserver$",
-				"k8s_deployment_name": "^testserver$",
-				"k8s_replicaset_name": "^testserver-",
-				"k8s_cluster_name":    "^beyla$",
-			})).
+			testMetricsDecoration(grpcServerMetrics, `{k8s_pod_name=~"testserver-.*"}`,
+				attributeMap(allAttributes, overrideAttrs))).
 		Assess("target_info metrics exist",
 			testMetricsDecoration([]string{"target_info"}, `{job=~".*testserver"}`, map[string]string{
 				"host_name": "testserver",
 				"host_id":   HostIDRegex,
+				"instance":  targetInfoInstance,
 			}),
 		).Feature()
 }
@@ -255,6 +276,7 @@ func FeatureDisableInformersAppMetricsDecoration() features.Feature {
 					"k8s_deployment_name": "^testserver$",
 					"k8s_replicaset_name": "^testserver-.*",
 					"k8s_cluster_name":    "^beyla$",
+					"service_instance_id": "^default\\.testserver-.+\\.testserver",
 				})).Feature()
 }
 

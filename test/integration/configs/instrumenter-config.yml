@@ -12,3 +12,8 @@ otel_traces_export:
 attributes:
   kubernetes:
     cluster_name: beyla
+    resource_labels:
+      deployment.environment: ["deployment.environment"]
+  select:
+    "*":
+      include: ["*"]

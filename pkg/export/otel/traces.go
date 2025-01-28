@@ -574,6 +574,9 @@ func (tr *tracesOTELReceiver) acceptSpan(span *request.Span) bool {
 	return false
 }
 
+// TODO use semconv.DBSystemRedis when we update to OTEL semantic conventions library 1.30
+var dbSystemRedis = attribute.String(string(attr.DBSystemName), semconv.DBSystemRedis.Value.AsString())
+
 // nolint:cyclop
 func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) []attribute.KeyValue {
 	var attrs []attribute.KeyValue
@@ -602,11 +605,19 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 			request.ServerPort(span.HostPort),
 		}
 	case request.EventTypeHTTPClient:
+		host := request.HTTPClientHost(span)
+		scheme := request.HTTPScheme(span)
+		url := span.Path
+		if span.HasOriginalHost() {
+			url = request.URLFull(scheme, host, span.Path)
+		}
+
 		attrs = []attribute.KeyValue{
 			request.HTTPRequestMethod(span.Method),
 			request.HTTPResponseStatusCode(span.Status),
-			request.HTTPUrlFull(span.Path),
-			request.ServerAddr(request.HostAsServer(span)),
+			request.HTTPUrlFull(url),
+			semconv.HTTPScheme(scheme),
+			request.ServerAddr(host),
 			request.ServerPort(span.HostPort),
 			request.HTTPRequestBodySize(int(span.RequestLength())),
 		}
@@ -622,7 +633,7 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 		attrs = []attribute.KeyValue{
 			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
-			span.DBSystem(), // We can distinguish in the future for MySQL, Postgres etc
+			span.DBSystemName(), // We can distinguish in the future for MySQL, Postgres etc
 		}
 		if _, ok := optionalAttrs[attr.DBQueryText]; ok {
 			attrs = append(attrs, request.DBQueryText(span.Statement))
@@ -639,7 +650,7 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 		attrs = []attribute.KeyValue{
 			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
-			semconv.DBSystemRedis,
+			dbSystemRedis,
 		}
 		operation := span.Method
 		if operation != "" {

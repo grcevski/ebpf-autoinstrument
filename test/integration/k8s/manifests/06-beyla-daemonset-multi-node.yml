@@ -8,6 +8,8 @@ data:
       kubernetes:
         enable: true
         cluster_name: beyla
+        resource_labels:
+          deployment.environment: ["deployment.environment"]
     trace_printer: text
     log_level: debug
     discovery:
@@ -79,10 +81,6 @@ spec:
               value: "10ms"
             - name: BEYLA_BPF_BATCH_TIMEOUT
               value: "10ms"
-            - name: BEYLA_METRICS_REPORT_TARGET
-              value: "true"
-            - name: BEYLA_METRICS_REPORT_PEER
-              value: "true"
             - name: BEYLA_NAME_RESOLVER_SOURCES
               value: "dns,k8s"
             - name: BEYLA_BPF_ENABLE_CONTEXT_PROPAGATION

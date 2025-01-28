@@ -29,6 +29,7 @@ services:
       - {{ .ConfigDir }}:/configs
       - ./testoutput/run:/var/run/beyla
       - ../../../testoutput:/coverage
+      - /sys/fs/cgroup:/sys/fs/cgroup
     privileged: true # in some environments (not GH Pull Requests) you can set it to false and then cap_add: [ SYS_ADMIN ]
     network_mode: "service:grpcsrv"
     pid: "service:grpcsrv"
@@ -41,6 +42,7 @@ services:
       BEYLA_BPF_BATCH_TIMEOUT: "10ms"
       BEYLA_LOG_LEVEL: "DEBUG"
       BEYLA_BPF_DEBUG: "true"
+      BEYLA_BPF_ENABLE_CONTEXT_PROPAGATION: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318"
     depends_on:
       grpcsrv:

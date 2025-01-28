@@ -134,6 +134,11 @@ static __always_inline void http_get_or_create_trace_info(http_connection_metada
     if (meta) {
         u32 type = trace_type_from_meta(meta);
         set_trace_info_for_connection(conn, type, tp_p);
+        // TODO: If the user code setup traceparent manually, don't interfere and add
+        // something else with TC L7. The main challenge is that with kprobes, the
+        // sock_msg program has already punched a hole in the HTTP headers and has made
+        // the HTTP header invalid. We need to add more smarts there or pull the
+        // sock msg information here and mark it so that we don't override the span_id.
         server_or_client_trace(meta->type, conn, tp_p);
     }
 }

@@ -78,14 +78,6 @@ type MetricsConfig struct {
 	// InsecureSkipVerify is not standard, so we don't follow the same naming convention
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify" env:"BEYLA_OTEL_INSECURE_SKIP_VERIFY"`
 
-	// ReportTarget specifies whether http.target should be submitted as a metric attribute. It is disabled by
-	// default to avoid cardinality explosion in paths with IDs. In that case, it is recommended to group these
-	// requests in the Routes node
-	// Deprecated. Going to be removed in Beyla 2.0. Use attributes.select instead
-	ReportTarget bool `yaml:"report_target" env:"BEYLA_METRICS_REPORT_TARGET"`
-	// Deprecated. Going to be removed in Beyla 2.0. Use attributes.select instead
-	ReportPeerInfo bool `yaml:"report_peer" env:"BEYLA_METRICS_REPORT_PEER"`
-
 	Buckets              Buckets `yaml:"buckets"`
 	HistogramAggregation string  `yaml:"histogram_aggregation" env:"OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION"`
 
@@ -197,6 +189,8 @@ type MetricsReporter struct {
 	attrHTTPRequestSize       []attributes.Field[*request.Span, attribute.KeyValue]
 	attrHTTPClientRequestSize []attributes.Field[*request.Span, attribute.KeyValue]
 	attrGPUKernelCalls        []attributes.Field[*request.Span, attribute.KeyValue]
+	attrGPUKernelGridSize     []attributes.Field[*request.Span, attribute.KeyValue]
+	attrGPUKernelBlockSize    []attributes.Field[*request.Span, attribute.KeyValue]
 	attrGPUMemoryAllocations  []attributes.Field[*request.Span, attribute.KeyValue]
 }
 
@@ -228,6 +222,8 @@ type Metrics struct {
 	tracesTargetInfo      instrument.Int64UpDownCounter
 	gpuKernelCallsTotal   *Expirer[*request.Span, instrument.Int64Counter, int64]
 	gpuMemoryAllocsTotal  *Expirer[*request.Span, instrument.Int64Counter, int64]
+	gpuKernelGridSize     *Expirer[*request.Span, instrument.Float64Histogram, float64]
+	gpuKernelBlockSize    *Expirer[*request.Span, instrument.Float64Histogram, float64]
 }
 
 func ReportMetrics(
@@ -307,6 +303,10 @@ func newMetricsReporter(
 			request.SpanOTELGetters, mr.attributes.For(attributes.GPUKernelLaunchCalls))
 		mr.attrGPUMemoryAllocations = attributes.OpenTelemetryGetters(
 			request.SpanOTELGetters, mr.attributes.For(attributes.GPUMemoryAllocations))
+		mr.attrGPUKernelGridSize = attributes.OpenTelemetryGetters(
+			request.SpanOTELGetters, mr.attributes.For(attributes.GPUKernelGridSize))
+		mr.attrGPUKernelBlockSize = attributes.OpenTelemetryGetters(
+			request.SpanOTELGetters, mr.attributes.For(attributes.GPUKernelBlockSize))
 	}
 
 	mr.reporters = NewReporterPool[*svc.Attrs, *Metrics](cfg.ReportersCacheLen, cfg.TTL, timeNow,
@@ -491,6 +491,20 @@ func (mr *MetricsReporter) setupOtelMeters(m *Metrics, meter instrument.Meter) e
 		}
 		m.gpuMemoryAllocsTotal = NewExpirer[*request.Span, instrument.Int64Counter, int64](
 			m.ctx, gpuMemoryAllocationsTotal, mr.attrGPUMemoryAllocations, timeNow, mr.cfg.TTL)
+
+		gpuKernelGridSize, err := meter.Float64Histogram(attributes.GPUKernelGridSize.OTEL, instrument.WithUnit("1"))
+		if err != nil {
+			return fmt.Errorf("creating gpu kernel grid size histogram: %w", err)
+		}
+		m.gpuKernelGridSize = NewExpirer[*request.Span, instrument.Float64Histogram, float64](
+			m.ctx, gpuKernelGridSize, mr.attrGPUKernelGridSize, timeNow, mr.cfg.TTL)
+
+		gpuKernelBlockSize, err := meter.Float64Histogram(attributes.GPUKernelBlockSize.OTEL, instrument.WithUnit("1"))
+		if err != nil {
+			return fmt.Errorf("creating gpu kernel block size histogram: %w", err)
+		}
+		m.gpuKernelBlockSize = NewExpirer[*request.Span, instrument.Float64Histogram, float64](
+			m.ctx, gpuKernelBlockSize, mr.attrGPUKernelBlockSize, timeNow, mr.cfg.TTL)
 	}
 
 	return nil
@@ -853,6 +867,12 @@ func (r *Metrics) record(span *request.Span, mr *MetricsReporter) {
 			if mr.is.GPUEnabled() {
 				gcalls, attrs := r.gpuKernelCallsTotal.ForRecord(span)
 				gcalls.Add(r.ctx, 1, instrument.WithAttributeSet(attrs))
+
+				ggrid, attrs := r.gpuKernelGridSize.ForRecord(span)
+				ggrid.Record(r.ctx, float64(span.ContentLength), instrument.WithAttributeSet(attrs))
+
+				gblock, attrs := r.gpuKernelBlockSize.ForRecord(span)
+				gblock.Record(r.ctx, float64(span.SubType), instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeGPUMalloc:
 			if mr.is.GPUEnabled() {
