@@ -67,7 +67,7 @@ static inline PerCPURecord *get_per_cpu_record(void) {
 static inline __attribute__((__always_inline__)) ErrorCode _push_with_max_frames(
     Trace *trace, u64 file, u64 line, u8 frame_type, u8 return_address, u32 max_frames) {
     if (trace->stack_len >= max_frames) {
-        bpf_d_printk("unable to push frame: stack is full");
+        bpf_d_printk("unable to push frame: stack is full, %d >= %d", trace->stack_len, max_frames);
         increment_metric(metricID_UnwindErrStackLengthExceeded);
         return ERR_STACK_LENGTH_EXCEEDED;
     }

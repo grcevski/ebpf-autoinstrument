@@ -24,7 +24,7 @@ struct stack_delta_array {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, u32);
     __type(value, StackDelta);
-    __uint(max_entries, 8192);
+    __uint(max_entries, 80000);
 } stack_delta_array SEC(".maps");
 
 // Macro to create a map named exe_id_to_X_stack_deltas that is a nested maps with a fileID for the
