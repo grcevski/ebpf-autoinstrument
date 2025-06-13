@@ -370,7 +370,7 @@ github.com/munnerz/goautoneg
 # github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f
 ## explicit
 github.com/mxk/go-flowrate/flowrate
-# github.com/open-telemetry/opentelemetry-ebpf-instrumentation v0.0.0-20250612234548-4aae6e9741b4
+# github.com/open-telemetry/opentelemetry-ebpf-instrumentation v0.0.0-20250612235719-9266ba8148da
 ## explicit; go 1.24.1
 github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector
 github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/bhpack
@@ -390,6 +390,13 @@ github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attribut
 github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names
 github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/expire
 github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations
+github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric
+github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/api/metric
+github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/components
+github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/components/aggregate
+github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/components/exemplar
+github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/components/x
+github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/global
 github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/filter
 github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/kubeflags
 github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg
